@@ -960,7 +960,7 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   io.cpu.resp.bits.store_data := pstore1_data
   if (true) {
     val resp = io.cpu.resp
-    val difftest = DifftestModule(new DiffStoreEvent, delay = 3)
+    val difftest = DifftestModule(new DiffStoreEvent, delay = 3, dontCare = true)
     difftest.coreid := 0.U
     difftest.index  := 0.U
     difftest.valid  := resp.valid && !resp.bits.has_data
