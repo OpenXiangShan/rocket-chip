@@ -6,7 +6,6 @@ import coursier.maven.MavenRepository
 import $file.hardfloat.common
 import $file.cde.common
 import $file.common
-import $file.difftest.build
 
 object v {
   val scala = "2.13.10"
@@ -23,7 +22,7 @@ object v {
 object macros extends Macros
 
 trait Macros
-  extends millbuild.common.MacrosModule
+  extends $file.common.MacrosModule
     with RocketChipPublishModule
     with SbtModule {
 
@@ -35,13 +34,13 @@ trait Macros
 object hardfloat extends mill.define.Cross[Hardfloat](v.chiselCrossVersions.keys.toSeq)
 
 trait Hardfloat
-  extends millbuild.hardfloat.common.HardfloatModule
+  extends $file.hardfloat.common.HardfloatModule
     with RocketChipPublishModule
     with Cross.Module[String] {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.pwd / "hardfloat" / "hardfloat"
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "hardfloat" / "hardfloat"
 
   def chiselModule = None
 
@@ -55,29 +54,34 @@ trait Hardfloat
 object cde extends CDE
 
 trait CDE
-  extends millbuild.cde.common.CDEModule
+  extends $file.cde.common.CDEModule
     with RocketChipPublishModule
     with ScalaModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.pwd / "cde" / "cde"
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "cde" / "cde"
 }
 
 trait Difftest
-  extends millbuild.difftest.build.CommonDiffTest
+  extends SbtModule
+    with HasChisel
     with RocketChipPublishModule
     with Cross.Module[String] {
 
-  override def scalaVersion: T[String] = T(v.scala)
+  def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.pwd / "difftest"
+  def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "difftest"
 
-  override def ivyDeps = Agg(v.chiselCrossVersions(crossValue)._1)
+  def chiselModule: Option[ScalaModule] = None
 
-  override def scalacPluginIvyDeps = Agg(v.chiselCrossVersions(crossValue)._2)
+  def chiselPluginJar: T[Option[PathRef]] = None
 
-  override def scalacOptions = T(Seq[String]())
+  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
+
+  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
+
+ // override def scalacOptions = T(Seq[String]())
 }
 
 object difftest extends mill.define.Cross[Difftest](v.chiselCrossVersions.keys.toSeq)
@@ -111,7 +115,7 @@ object ccover extends Cross[CcoverModule](v.chiselCrossVersions.keys.toSeq)
 object rocketchip extends Cross[RocketChip](v.chiselCrossVersions.keys.toSeq)
 
 trait RocketChip
-  extends millbuild.common.RocketChipModule
+  extends $file.common.RocketChipModule
     with RocketChipPublishModule
     with SbtModule
     with Cross.Module[String] {
@@ -163,7 +167,7 @@ trait Generator extends SbtModule with Cross.Module[String] {
   private val isChisel3 = crossValue.startsWith("3")
 
   private val directory = if (isChisel3) "chisel3" else "chisel"
-  override def millSourcePath = os.pwd / "generator" / directory
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "generator" / directory
 
   override def scalaVersion: T[String] = T(v.scala)
 
