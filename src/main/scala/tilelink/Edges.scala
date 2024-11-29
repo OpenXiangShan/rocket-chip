@@ -89,7 +89,7 @@ class TLEdge(
 
   def hasData(x: TLChannel): Bool = {
     val opdata = x match {
-      case a: TLBundleA => !(a.opcode(2) ^ a.opcode(3))
+      case a: TLBundleA => !a.opcode(2)
         //    opcode === TLMessages.PutFullData    ||
         //    opcode === TLMessages.PutPartialData ||
         //    opcode === TLMessages.ArithmeticData ||
