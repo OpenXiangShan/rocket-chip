@@ -89,7 +89,7 @@ class TLEdge(
 
   def hasData(x: TLChannel): Bool = {
     val opdata = x match {
-      case a: TLBundleA => !a.opcode(2)
+      case a: TLBundleA => !(a.opcode(2) ^ a.opcode(3))
         //    opcode === TLMessages.PutFullData    ||
         //    opcode === TLMessages.PutPartialData ||
         //    opcode === TLMessages.ArithmeticData ||
@@ -369,6 +369,26 @@ class TLEdgeOut(
     a.user    := DontCare
     a.echo    := DontCare
     a.mask    := mask(toAddress, lgSize)
+    a.data    := DontCare
+    a.corrupt := false.B
+    (legal, a)
+  }
+
+  def CacheBlockOperation(fromSource: UInt, toAddress: UInt, lgSize: UInt, opcode: UInt) = {
+    val legal = manager.supportsAcquireBFast(toAddress, lgSize)
+    val a = Wire(new TLBundleA(bundle))
+    a.opcode  := MuxLookup(opcode, TLMessages.CBOClean)(Seq(
+      0.U -> TLMessages.CBOClean,
+      1.U -> TLMessages.CBOFlush,
+      2.U -> TLMessages.CBOInval
+    ))
+    a.param   := DontCare
+    a.size    := lgSize
+    a.source  := fromSource
+    a.address := toAddress
+    a.user    := DontCare
+    a.echo    := DontCare
+    a.mask    := DontCare
     a.data    := DontCare
     a.corrupt := false.B
     (legal, a)
