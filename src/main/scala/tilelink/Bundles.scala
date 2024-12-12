@@ -185,6 +185,7 @@ sealed trait TLAddrChannel extends TLDataChannel
 final class TLBundleA(params: TLBundleParameters)
   extends TLBundleBase(params) with TLAddrChannel
 {
+  override def typeName = s"TLBundleA_${params.shortName}"
   val channelName = "'A' channel"
   // fixed fields during multibeat:
   val opcode  = UInt(4.W)
@@ -202,6 +203,7 @@ final class TLBundleA(params: TLBundleParameters)
 final class TLBundleB(params: TLBundleParameters)
   extends TLBundleBase(params) with TLAddrChannel
 {
+  override def typeName = s"TLBundleB_${params.shortName}"
   val channelName = "'B' channel"
   // fixed fields during multibeat:
   val opcode  = UInt(3.W)
@@ -218,6 +220,7 @@ final class TLBundleB(params: TLBundleParameters)
 final class TLBundleC(params: TLBundleParameters)
   extends TLBundleBase(params) with TLAddrChannel
 {
+  override def typeName = s"TLBundleC_${params.shortName}"
   val channelName = "'C' channel"
   // fixed fields during multibeat:
   val opcode  = UInt(3.W)
@@ -235,6 +238,7 @@ final class TLBundleC(params: TLBundleParameters)
 final class TLBundleD(params: TLBundleParameters)
   extends TLBundleBase(params) with TLDataChannel
 {
+  override def typeName = s"TLBundleD_${params.shortName}"
   val channelName = "'D' channel"
   // fixed fields during multibeat:
   val opcode  = UInt(4.W)
@@ -253,6 +257,7 @@ final class TLBundleD(params: TLBundleParameters)
 final class TLBundleE(params: TLBundleParameters)
   extends TLBundleBase(params) with TLChannel
 {
+  override def typeName = s"TLBundleE_${params.shortName}"
   val channelName = "'E' channel"
   val sink = UInt(params.sinkBits.W) // to
 }
