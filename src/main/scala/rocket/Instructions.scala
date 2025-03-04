@@ -1168,6 +1168,8 @@ object CSRs {
   val mhpmcounter29 = 0xb1d
   val mhpmcounter30 = 0xb1e
   val mhpmcounter31 = 0xb1f
+  val mcyclecfg = 0x321
+  val minstretcfg = 0x322
   val mhpmevent3 = 0x323
   val mhpmevent4 = 0x324
   val mhpmevent5 = 0x325
