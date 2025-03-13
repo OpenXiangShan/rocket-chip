@@ -782,7 +782,6 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this){
     val nComponents = getNComponents()
-    Annotated.params(this, cfg)
     val supportHartArray = cfg.supportHartArray & (nComponents > 1)
     val nExtTriggers = cfg.nExtTriggers
     val nHaltGroups = if ((nComponents > 1) | (nExtTriggers > 0)) cfg.nHaltGroups
