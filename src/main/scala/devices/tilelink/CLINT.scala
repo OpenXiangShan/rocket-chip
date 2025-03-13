@@ -59,7 +59,6 @@ class CLINT(params: CLINTParams, beatBytes: Int)(implicit p: Parameters) extends
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    Annotated.params(this, params)
     require (intnode.edges.in.size == 0, "CLINT only produces interrupts; it does not accept them")
 
     val io = IO(new Bundle {

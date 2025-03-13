@@ -4,8 +4,7 @@ package freechips.rocketchip.diplomacy
 
 import chisel3._
 import chisel3.{Module, RawModule, Reset, withClockAndReset}
-import chisel3.experimental.{ChiselAnnotation, CloneModuleAsRecord, SourceInfo, UnlocatableSourceInfo}
-import firrtl.passes.InlineAnnotation
+import chisel3.experimental.{CloneModuleAsRecord, SourceInfo, UnlocatableSourceInfo}
 import org.chipsalliance.cde.config.Parameters
 
 import scala.collection.immutable.{SeqMap, SortedMap}
@@ -379,9 +378,7 @@ sealed trait LazyModuleImpLike extends RawModule {
     }
 
     if (wrapper.shouldBeInlined) {
-      chisel3.experimental.annotate(new ChiselAnnotation {
-        def toFirrtl = InlineAnnotation(toNamed)
-      })
+      chisel3.experimental.annotate(this)(Seq(firrtl.passes.InlineAnnotation(toNamed)))
     }
 
     // Return [[IO]] and [[Dangle]] of this [[LazyModuleImp]].

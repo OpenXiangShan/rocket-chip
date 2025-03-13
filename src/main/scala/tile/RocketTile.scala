@@ -122,7 +122,6 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
     with HasFpuOpt
     with HasLazyRoCCModule
     with HasICacheFrontendModule {
-  Annotated.params(this, outer.rocketParams)
 
   val core = Module(new Rocket(outer)(outer.p))
 
