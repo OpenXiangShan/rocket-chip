@@ -682,9 +682,9 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
     val tlErrorParams = DevNullParams(AddressSet.misaligned(dmTopAddr, APBDebugConsts.apbDebugRegBase-dmTopAddr), maxAtomic=0, maxTransfer=4)
     val tlError  = LazyModule(new TLError(tlErrorParams, buffer=false))
     val apbXbar  = LazyModule(new APBFanout())
-    val apbRegs  = LazyModule(new APBDebugRegisters())
-
-    apbRegs.node := apbXbar.node
+//    val apbRegs  = LazyModule(new APBDebugRegisters())
+//
+//    apbRegs.node := apbXbar.node
     apb2tl.node  := apbXbar.node
     apb2tlBuffer.node := apb2tl.node
     dmiXbar.node := apb2tlBuffer.node
