@@ -1123,7 +1123,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
 
         when (~io.dmactive || ~dmAuthenticated) {
           hgFired(hg) := false.B
-        }.elsewhen (~hgFired(hg) & (hgHartFiring(hg) | hgTrigFiring(hg))) {
+        }.elsewhen (~hgFired(hg) & (hgHartFiring(hg) | (~hgHartsAllHalted(hg) & hgTrigFiring(hg)))) {
           hgFired(hg) := true.B
         }.elsewhen ( hgFired(hg) & hgHartsAllHalted(hg) & hgTrigsAllAcked(hg)) {
           hgFired(hg) := false.B
