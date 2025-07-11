@@ -6,6 +6,7 @@ BUILD_DIR = $(abspath ./build)
 RTL_DIR    = $(BUILD_DIR)/rtl
 RTL_SUFFIX = sv
 TOP_V      = $(RTL_DIR)/SimTop.$(RTL_SUFFIX)
+TOP_FIR    = $(RTL_DIR)/SimTop.fir
 
 MILL_ARGS = --target-dir $(RTL_DIR) \
             --full-stacktrace
@@ -36,6 +37,10 @@ $(BOOTROM_IMG): $(BOOTROM_SRC)
 bootrom: $(BOOTROM_IMG)
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
+
+$(TOP_FIR): $(SCALA_FILE)
+	mill -i generator[$(CHISEL_VERSION)].runMain $(FUZZ_TOP) $(MILL_ARGS) --fir-only
+
 $(TOP_V): $(SCALA_FILE) $(BOOTROM_IMG)
 	mill -i generator[$(CHISEL_VERSION)].runMain $(FUZZ_TOP) $(MILL_ARGS)
 	@cp src/main/resources/vsrc/EICG_wrapper.v $(RTL_DIR)
@@ -46,6 +51,7 @@ $(TOP_V): $(SCALA_FILE) $(BOOTROM_IMG)
 	done
 
 
+sim-fir: $(TOP_FIR)
 sim-verilog: $(TOP_V)
 
 emu: sim-verilog
