@@ -31,6 +31,10 @@ ifneq ($(FIRRTL_COVER),)
 MILL_ARGS += COVER=$(FIRRTL_COVER)
 endif
 
+ifeq ($(filter gsim,$(MAKECMDGOALS)),gsim)
+MILL_ARGS += --dump-fir --difftest-config G
+endif
+
 BOOTROM_DIR = $(abspath ./bootrom)
 BOOTROM_SRC = $(BOOTROM_DIR)/bootrom.S
 BOOTROM_IMG = $(BOOTROM_DIR)/bootrom.img
@@ -57,6 +61,9 @@ sim-verilog: $(TOP_V)
 
 emu: sim-verilog
 	@$(MAKE) -C difftest emu WITH_CHISELDB=0 WITH_CONSTANTIN=0 RTL_SUFFIX=$(RTL_SUFFIX)
+
+gsim: sim-verilog
+	@$(MAKE) -C difftest gsim WITH_CHISELDB=0 WITH_CONSTANTIN=0 RTL_SUFFIX=$(RTL_SUFFIX)
 
 clean:
 	rm -rf $(BUILD_DIR)

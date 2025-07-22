@@ -6,10 +6,11 @@ import difftest.DifftestModule
 
 object FuzzMain {
   def main(args: Array[String]): Unit = {
+    val chiselArgs = DifftestModule.parseArgs(args)
     val generator = Seq(ChiselGeneratorAnnotation(() => {
       freechips.rocketchip.diplomacy.DisableMonitors(p => new SimTop()(p))(new FuzzConfig)
     }))
-    (new ChiselStage).execute(args, generator
+    (new ChiselStage).execute(chiselArgs, generator
       :+ FirtoolOption("--disable-annotation-unknown")
     )
   }
