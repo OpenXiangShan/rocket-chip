@@ -19,7 +19,11 @@ ifeq ($(CHISEL_VERSION),3.6.1)
 RTL_SUFFIX = v
 TOP_V      = $(RTL_DIR)/SimTop.$(RTL_SUFFIX)
 else
+CHISEL_TARGET ?= systemverilog
+MILL_ARGS += --target $(CHISEL_TARGET)
+ifeq ($(CHISEL_TARGET),systemverilog)
 MILL_ARGS += --split-verilog
+endif
 endif
 
 # Coverage support
@@ -38,20 +42,17 @@ bootrom: $(BOOTROM_IMG)
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 
-$(TOP_FIR): $(SCALA_FILE)
-	mill -i generator[$(CHISEL_VERSION)].runMain $(FUZZ_TOP) $(MILL_ARGS) --fir-only
-
 $(TOP_V): $(SCALA_FILE) $(BOOTROM_IMG)
 	mill -i generator[$(CHISEL_VERSION)].runMain $(FUZZ_TOP) $(MILL_ARGS)
+ifeq ($(CHISEL_TARGET),systemverilog)
 	@cp src/main/resources/vsrc/EICG_wrapper.v $(RTL_DIR)
 	@sed -i 's/UNOPTFLAT/LATCH/g' $(RTL_DIR)/EICG_wrapper.v
 	@for file in $(RTL_DIR)/*.$(RTL_SUFFIX); do                                  \
 		sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' "$$file"; \
 		sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" "$$file";        \
 	done
+endif
 
-
-sim-fir: $(TOP_FIR)
 sim-verilog: $(TOP_V)
 
 emu: sim-verilog
