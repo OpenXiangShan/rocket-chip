@@ -50,6 +50,7 @@ class FuzzConfig extends Config(
           nPMPs = 0,
           nBreakpoints = 0,
           chickenCSR = false,
+          haveSimTimeout = false,
         )
       ))
     }
