@@ -5,14 +5,17 @@ package freechips.rocketchip.rocket
 
 import chisel3._
 import chisel3.util._
-import chisel3.{withClock,withReset}
 import chisel3.experimental.SourceInfo
+
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tile._
-import freechips.rocketchip.tilelink.{TLEdgeOut, TLWidthWidget}
-import freechips.rocketchip.util._
-import freechips.rocketchip.util.property
+import org.chipsalliance.diplomacy.bundlebridge._
+import org.chipsalliance.diplomacy.lazymodule._
+
+import freechips.rocketchip.tile.{CoreBundle, BaseTile}
+import freechips.rocketchip.tilelink.{TLWidthWidget, TLEdgeOut}
+import freechips.rocketchip.util.{ClockGate, ShiftQueue, property}
+
+import freechips.rocketchip.util.UIntToAugmentedUInt
 
 class FrontendReq(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = UInt(vaddrBitsExtended.W)
@@ -52,6 +55,7 @@ class FrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
   val sfence = Valid(new SFenceReq)
   val resp = Flipped(Decoupled(new FrontendResp))
   val gpa = Flipped(Valid(UInt(vaddrBitsExtended.W)))
+  val gpa_is_pte = Input(Bool())
   val btb_update = Valid(new BTBUpdate)
   val bht_update = Valid(new BHTUpdate)
   val ras_update = Valid(new RASUpdate)
@@ -61,9 +65,9 @@ class FrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
   val progress = Output(Bool())
 }
 
-class Frontend(val icacheParams: ICacheParams, staticIdForMetadataUseOnly: Int)(implicit p: Parameters) extends LazyModule {
+class Frontend(val icacheParams: ICacheParams, tileId: Int)(implicit p: Parameters) extends LazyModule {
   lazy val module = new FrontendModule(this)
-  val icache = LazyModule(new ICache(icacheParams, staticIdForMetadataUseOnly))
+  val icache = LazyModule(new ICache(icacheParams, tileId))
   val masterNode = icache.masterNode
   val slaveNode = icache.slaveNode
   val resetVectorSinkNode = BundleBridgeSink[UInt](Some(() => UInt(masterNode.edges.out.head.bundle.addressBits.W)))
@@ -348,9 +352,11 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
   // supply guest physical address to commit stage
   val gpa_valid = Reg(Bool())
   val gpa = Reg(UInt(vaddrBitsExtended.W))
+  val gpa_is_pte = Reg(Bool())
   when (fq.io.enq.fire && s2_tlb_resp.gf.inst) {
     when (!gpa_valid) {
       gpa := s2_tlb_resp.gpa
+      gpa_is_pte := s2_tlb_resp.gpa_is_pte
     }
     gpa_valid := true.B
   }
@@ -359,6 +365,7 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
   }
   io.cpu.gpa.valid := gpa_valid
   io.cpu.gpa.bits := gpa
+  io.cpu.gpa_is_pte := gpa_is_pte
 
   // performance events
   io.cpu.perf.acquire := icache.io.perf.acquire
@@ -383,7 +390,7 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
 /** Mix-ins for constructing tiles that have an ICache-based pipeline frontend */
 trait HasICacheFrontend extends CanHavePTW { this: BaseTile =>
   val module: HasICacheFrontendModule
-  val frontend = LazyModule(new Frontend(tileParams.icache.get, staticIdForMetadataUseOnly))
+  val frontend = LazyModule(new Frontend(tileParams.icache.get, tileId))
   tlMasterXbar.node := TLWidthWidget(tileParams.icache.get.rowBits/8) := frontend.masterNode
   connectTLSlave(frontend.slaveNode, tileParams.core.fetchBytes)
   frontend.icache.hartIdSinkNodeOpt.foreach { _ := hartIdNexusNode }

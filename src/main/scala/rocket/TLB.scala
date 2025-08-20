@@ -5,18 +5,24 @@ package freechips.rocketchip.rocket
 
 import chisel3._
 import chisel3.util._
-
-import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.subsystem.CacheBlockBytes
-import freechips.rocketchip.diplomacy.RegionType
-import freechips.rocketchip.tile.{CoreModule, CoreBundle}
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
-import freechips.rocketchip.util.property
-import freechips.rocketchip.devices.debug.DebugModuleKey
 import chisel3.experimental.SourceInfo
 
-case object PgLevels extends Field[Int](2)
+import org.chipsalliance.cde.config._
+
+import freechips.rocketchip.devices.debug.DebugModuleKey
+import freechips.rocketchip.diplomacy.RegionType
+import freechips.rocketchip.subsystem.CacheBlockBytes
+import freechips.rocketchip.tile.{CoreModule, CoreBundle}
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.{OptimizationBarrier, SetAssocLRU, PseudoLRU, PopCountAtLeast, property}
+
+import freechips.rocketchip.util.BooleanToAugmentedBoolean
+import freechips.rocketchip.util.IntToAugmentedInt
+import freechips.rocketchip.util.UIntToAugmentedUInt
+import freechips.rocketchip.util.UIntIsOneOf
+import freechips.rocketchip.util.SeqToAugmentedSeq
+import freechips.rocketchip.util.SeqBoolBitwiseOps
+
 case object ASIdBits extends Field[Int](0)
 case object VMIdBits extends Field[Int](0)
 
@@ -65,7 +71,7 @@ class TLBExceptions extends Bundle {
   val inst = Bool()
 }
 
-class TLBResp(implicit p: Parameters) extends CoreBundle()(p) {
+class TLBResp(lgMaxSize: Int = 3)(implicit p: Parameters) extends CoreBundle()(p) {
   // lookup responses
   val miss = Bool()
   /** physical address */
@@ -86,6 +92,10 @@ class TLBResp(implicit p: Parameters) extends CoreBundle()(p) {
   val must_alloc = Bool()
   /** if this address is prefetchable for caches*/
   val prefetchable = Bool()
+  /** size/cmd of request that generated this response*/
+  val size = UInt(log2Ceil(lgMaxSize + 1).W)
+  val cmd = UInt(M_SZ.W)
+
 }
 
 class TLBEntryData(implicit p: Parameters) extends CoreBundle()(p) {
@@ -306,11 +316,12 @@ case class TLBConfig(
   * @param edge collect SoC metadata.
   */
 class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(p) {
+  override def desiredName = if (instruction) "ITLB" else "DTLB"
   val io = IO(new Bundle {
     /** request from Core */
     val req = Flipped(Decoupled(new TLBReq(lgMaxSize)))
     /** response to Core */
-    val resp = Output(new TLBResp())
+    val resp = Output(new TLBResp(lgMaxSize))
     /** SFence Input */
     val sfence = Flipped(Valid(new SFenceReq))
     /** IO to PTW */
@@ -392,7 +403,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val vsatp_mode_mismatch  = priv_v && (vstage1_en =/= v_entries_use_stage1) && !io.req.bits.passthrough
 
   // share a single physical memory attribute checker (unshare if critical path)
-  val refill_ppn = io.ptw.resp.bits.pte.ppn(ppnBits-1, 0)
+  val refill_ppn = if (usingVM) io.ptw.resp.bits.pte.ppn(ppnBits-1, 0) else 0.U
   /** refill signal */
   val do_refill = usingVM.B && io.ptw.resp.valid
   /** sfence invalidate refill */
@@ -407,24 +418,21 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   pmp.io.size := io.req.bits.size
   pmp.io.pmp := (io.ptw.pmp: Seq[PMP])
   pmp.io.prv := mpu_priv
-  // PMA
-  // check exist a slave can consume this address.
-  val legal_address = edge.manager.findSafe(mpu_physaddr).reduce(_||_)
-  // check utility to help check SoC property.
-  def fastCheck(member: TLManagerParameters => Boolean) =
-    legal_address && edge.manager.fastProperty(mpu_physaddr, member, (b:Boolean) => b.B)
+
+  val pma = Module(new PMAChecker(edge.manager)(p))
+  pma.io.paddr := mpu_physaddr
   // todo: using DataScratchpad doesn't support cacheable.
-  val cacheable = fastCheck(_.supportsAcquireB) && (instruction || !usingDataScratchpad).B
-  val homogeneous = TLBPageLookup(edge.manager.managers, xLen, p(CacheBlockBytes), BigInt(1) << pgIdxBits)(mpu_physaddr).homogeneous
+  val cacheable = pma.io.resp.cacheable && (instruction || !usingDataScratchpad).B
+  val homogeneous = TLBPageLookup(edge.manager.managers, xLen, p(CacheBlockBytes), BigInt(1) << pgIdxBits, 1 << lgMaxSize)(mpu_physaddr).homogeneous
   // In M mode, if access DM address(debug module program buffer)
   val deny_access_to_debug = mpu_priv <= PRV.M.U && p(DebugModuleKey).map(dmp => dmp.address.contains(mpu_physaddr)).getOrElse(false.B)
-  val prot_r = fastCheck(_.supportsGet) && !deny_access_to_debug && pmp.io.r
-  val prot_w = fastCheck(_.supportsPutFull) && !deny_access_to_debug && pmp.io.w
-  val prot_pp = fastCheck(_.supportsPutPartial)
-  val prot_al = fastCheck(_.supportsLogical)
-  val prot_aa = fastCheck(_.supportsArithmetic)
-  val prot_x = fastCheck(_.executable) && !deny_access_to_debug && pmp.io.x
-  val prot_eff = fastCheck(Seq(RegionType.PUT_EFFECTS, RegionType.GET_EFFECTS) contains _.regionType)
+  val prot_r = pma.io.resp.r && !deny_access_to_debug && pmp.io.r
+  val prot_w = pma.io.resp.w && !deny_access_to_debug && pmp.io.w
+  val prot_pp = pma.io.resp.pp
+  val prot_al = pma.io.resp.al
+  val prot_aa = pma.io.resp.aa
+  val prot_x = pma.io.resp.x && !deny_access_to_debug && pmp.io.x
+  val prot_eff = pma.io.resp.eff
 
   // hit check
   val sector_hits = sectored_entries(memIdx).map(_.sectorHit(vpn, priv_v))
@@ -589,9 +597,9 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val pf_ld_array = Mux(cmd_read, ((~Mux(cmd_readx, x_array, r_array) & ~ptw_ae_array) | ptw_pf_array) & ~ptw_gf_array, 0.U)
   val pf_st_array = Mux(cmd_write_perms, ((~w_array & ~ptw_ae_array) | ptw_pf_array) & ~ptw_gf_array, 0.U)
   val pf_inst_array = ((~x_array & ~ptw_ae_array) | ptw_pf_array) & ~ptw_gf_array
-  val gf_ld_array = Mux(priv_v && cmd_read, ~Mux(cmd_readx, hx_array, hr_array) & ~ptw_ae_array, 0.U)
-  val gf_st_array = Mux(priv_v && cmd_write_perms, ~hw_array & ~ptw_ae_array, 0.U)
-  val gf_inst_array = Mux(priv_v, ~hx_array & ~ptw_ae_array, 0.U)
+  val gf_ld_array = Mux(priv_v && cmd_read, (~Mux(cmd_readx, hx_array, hr_array) | ptw_gf_array) & ~ptw_ae_array, 0.U)
+  val gf_st_array = Mux(priv_v && cmd_write_perms, (~hw_array | ptw_gf_array) & ~ptw_ae_array, 0.U)
+  val gf_inst_array = Mux(priv_v, (~hx_array | ptw_gf_array) & ~ptw_ae_array, 0.U)
 
   val gpa_hits = {
     val need_gpa_mask = if (instruction) gf_inst_array else gf_ld_array | gf_st_array
@@ -642,6 +650,8 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   io.resp.prefetchable := (prefetchable_array & hits).orR && edge.manager.managers.forall(m => !m.supportsAcquireB || m.supportsHint).B
   io.resp.miss := do_refill || vsatp_mode_mismatch || tlb_miss || multipleHits
   io.resp.paddr := Cat(ppn, io.req.bits.vaddr(pgIdxBits-1, 0))
+  io.resp.size := io.req.bits.size
+  io.resp.cmd := io.req.bits.cmd
   io.resp.gpa_is_pte := vstage1_en && r_gpa_is_pte
   io.resp.gpa := {
     val page = Mux(!vstage1_en, Cat(bad_gpa, vpn), r_gpa >> pgIdxBits)

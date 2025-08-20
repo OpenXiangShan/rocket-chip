@@ -4,9 +4,12 @@ package freechips.rocketchip.tilelink
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.util._
+
+import org.chipsalliance.cde.config._
+import org.chipsalliance.diplomacy.lazymodule._
+
+import freechips.rocketchip.diplomacy.{AddressDecoder, AddressSet, RegionType, IdRange, TriStateValue}
+import freechips.rocketchip.util.BundleField
 
 // Trades off slave port proximity against routing resource cost
 object ForceFanout
@@ -30,7 +33,7 @@ object ForceFanout
 private case class ForceFanoutParams(a: Boolean, b: Boolean, c: Boolean, d: Boolean, e: Boolean)
 private case object ForceFanoutKey extends Field(ForceFanoutParams(false, false, false, false, false))
 
-class TLXbar(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parameters) extends LazyModule
+class TLXbar(policy: TLArbiter.Policy = TLArbiter.roundRobin, nameSuffix: Option[String] = None)(implicit p: Parameters) extends LazyModule
 {
   val node = new TLNexusNode(
     clientFn  = { seq =>
@@ -74,7 +77,8 @@ class TLXbar(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parame
       println (s" Your TLXbar ($name with parent $parent) is very large, with ${node.in.size} Masters and ${node.out.size} Slaves.")
       println (s"!!! WARNING !!!")
     }
-
+    val wide_bundle = TLBundleParameters.union((node.in ++ node.out).map(_._2.bundle))
+    override def desiredName = (Seq("TLXbar") ++ nameSuffix ++ Seq(s"i${node.in.size}_o${node.out.size}_${wide_bundle.shortName}")).mkString("_")
     TLXbar.circuit(policy, node.in, node.out)
   }
 }
@@ -215,8 +219,8 @@ object TLXbar
       val r = outputIdRanges(o)
 
       if (connectAOI(o).exists(x=>x)) {
-        io_out(o).a.squeezeAll.waiveAll :<>= out(o).a.squeezeAll.waiveAll
         out(o).a.bits.user := DontCare
+        io_out(o).a.squeezeAll.waiveAll :<>= out(o).a.squeezeAll.waiveAll
       } else {
         out(o).a := DontCare
         io_out(o).a := DontCare
@@ -234,8 +238,8 @@ object TLXbar
       }
 
       if (connectCOI(o).exists(x=>x)) {
-        io_out(o).c.squeezeAll.waiveAll :<>= out(o).c.squeezeAll.waiveAll
         out(o).c.bits.user := DontCare
+        io_out(o).c.squeezeAll.waiveAll :<>= out(o).c.squeezeAll.waiveAll
       } else {
         out(o).c  := DontCare
         io_out(o).c  := DontCare
@@ -338,9 +342,9 @@ object TLXbar
     }
   }
 
-  def apply(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parameters): TLNode =
+  def apply(policy: TLArbiter.Policy = TLArbiter.roundRobin, nameSuffix: Option[String] = None)(implicit p: Parameters): TLNode =
   {
-    val xbar = LazyModule(new TLXbar(policy))
+    val xbar = LazyModule(new TLXbar(policy, nameSuffix))
     xbar.node
   }
 
