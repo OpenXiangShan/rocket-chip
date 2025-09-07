@@ -9,11 +9,7 @@ import $file.common
 
 object v {
   val scala = "2.13.10"
-  // the first version in this Map is the mainly supported version which will be used to run tests
-  val chiselCrossVersions = Map(
-    "3.6.1" -> (ivy"edu.berkeley.cs::chisel3:3.6.1", ivy"edu.berkeley.cs:::chisel3-plugin:3.6.1"),
-    "6.7.0" -> (ivy"org.chipsalliance::chisel:6.7.0", ivy"org.chipsalliance:::chisel-plugin:6.7.0"),
-  )
+  val chisel = (ivy"org.chipsalliance::chisel:6.7.0", ivy"org.chipsalliance:::chisel-plugin:6.7.0")
   val mainargs = ivy"com.lihaoyi::mainargs:0.5.0"
   val json4sJackson = ivy"org.json4s::json4s-jackson:4.0.5"
   val scalaReflect = ivy"org.scala-lang:scala-reflect:${scala}"
@@ -31,12 +27,11 @@ trait Macros
   def scalaReflectIvy = v.scalaReflect
 }
 
-object hardfloat extends mill.define.Cross[Hardfloat](v.chiselCrossVersions.keys.toSeq)
+object hardfloat extends Hardfloat
 
 trait Hardfloat
   extends $file.hardfloat.common.HardfloatModule
-    with RocketChipPublishModule
-    with Cross.Module[String] {
+    with RocketChipPublishModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
@@ -46,9 +41,9 @@ trait Hardfloat
 
   def chiselPluginJar = None
 
-  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
+  def chiselIvy = Some(v.chisel._1)
 
-  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
+  def chiselPluginIvy = Some(v.chisel._2)
 }
 
 object cde extends CDE
@@ -66,8 +61,7 @@ trait CDE
 trait Difftest
   extends SbtModule
     with HasChisel
-    with RocketChipPublishModule
-    with Cross.Module[String] {
+    with RocketChipPublishModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
@@ -77,48 +71,19 @@ trait Difftest
 
   def chiselPluginJar: T[Option[PathRef]] = None
 
-  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
+  def chiselIvy = Some(v.chisel._1)
 
-  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
-
- // override def scalacOptions = T(Seq[String]())
+  def chiselPluginIvy = Some(v.chisel._2)
 }
 
-object difftest extends mill.define.Cross[Difftest](v.chiselCrossVersions.keys.toSeq)
+object difftest extends Difftest
 
-trait CcoverModule extends SbtModule
-    with HasChisel
-    with Cross.Module[String] {
-
-  def scalaVersion: T[String] = T(v.scala)
-
-  def sourceRoot = T.sources { T.workspace / "ccover" / "instrumentation" / "src" }
-
-  private def getSources(p: PathRef) = if (os.exists(p.path)) os.walk(p.path) else Seq()
-
-  def allSources = T { sourceRoot().flatMap(getSources).map(PathRef(_)) }
-
-  def chiselModule: Option[ScalaModule] = None
-
-  def chiselPluginJar: T[Option[PathRef]] = None
-
-  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
-
-  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
-
-  def ivyDeps = super.ivyDeps() ++ Agg(ivy"edu.berkeley.cs::chiseltest:0.6.2")
-
-}
-
-object ccover extends Cross[CcoverModule](v.chiselCrossVersions.keys.toSeq)
-
-object rocketchip extends Cross[RocketChip](v.chiselCrossVersions.keys.toSeq)
+object rocketchip extends RocketChip
 
 trait RocketChip
   extends $file.common.RocketChipModule
     with RocketChipPublishModule
-    with SbtModule
-    with Cross.Module[String] {
+    with SbtModule {
   def scalaVersion: T[String] = T(v.scala)
 
   override def millSourcePath = super.millSourcePath / os.up
@@ -127,17 +92,17 @@ trait RocketChip
 
   def chiselPluginJar = None
 
-  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
+  def chiselIvy = Some(v.chisel._1)
 
-  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
+  def chiselPluginIvy = Some(v.chisel._2)
 
   def macrosModule = macros
 
-  def hardfloatModule = hardfloat(crossValue)
+  def hardfloatModule = hardfloat
 
   def cdeModule = cde
 
-  def difftestModule = difftest(crossValue)
+  def difftestModule = difftest
 
   def mainargsIvy = v.mainargs
 
@@ -160,29 +125,6 @@ trait RocketChipPublishModule
   override def publishVersion: T[String] = T("1.6-SNAPSHOT")
 }
 
-object generator extends Cross[Generator](v.chiselCrossVersions.keys.toSeq)
-
-trait Generator extends SbtModule with Cross.Module[String] {
-
-  private val isChisel3 = crossValue.startsWith("3")
-
-  private val directory = if (isChisel3) "chisel3" else "chisel"
-  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "generator" / directory
-
-  override def scalaVersion: T[String] = T(v.scala)
-
-  override def ivyDeps = Agg(v.chiselCrossVersions(crossValue)._1)
-
-  override def scalacPluginIvyDeps = Agg(v.chiselCrossVersions(crossValue)._2)
-
-  override def scalacOptions = T(Seq[String]())
-
-  override def moduleDeps = super.moduleDeps ++
-    Some(rocketchip(crossValue)) ++
-    Option.when(isChisel3)(ccover(crossValue))
-
-}
-
 // Tests
 trait Emulator extends Cross.Module2[String, String] {
   val top: String = crossValue
@@ -193,7 +135,7 @@ trait Emulator extends Cross.Module2[String, String] {
       os.proc(
         mill.util.Jvm.javaExe,
         "-jar",
-        rocketchip(v.chiselCrossVersions.keys.head).assembly().path,
+        rocketchip.assembly().path,
         "--dir", T.dest.toString,
         "--top", top,
         config.split('_').flatMap(c => Seq("--config", c)),

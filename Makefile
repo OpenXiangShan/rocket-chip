@@ -1,5 +1,3 @@
-CHISEL_VERSION = 6.7.0
-
 FUZZ_TOP  = freechips.rocketchip.system.FuzzMain
 BUILD_DIR = $(abspath ./build)
 
@@ -11,33 +9,21 @@ TOP_FIR    = $(RTL_DIR)/SimTop.fir
 MILL_ARGS = --target-dir $(RTL_DIR) \
             --full-stacktrace
 
-ifeq ($(XFUZZ),1)
-CHISEL_VERSION = 3.6.1
-endif
-
-ifeq ($(CHISEL_VERSION),3.6.1)
-RTL_SUFFIX = v
-TOP_V      = $(RTL_DIR)/SimTop.$(RTL_SUFFIX)
-else
 CHISEL_TARGET ?= systemverilog
 MILL_ARGS += --target $(CHISEL_TARGET)
 ifeq ($(CHISEL_TARGET),systemverilog)
 MILL_ARGS += --split-verilog
 endif
+
 ifneq ($(FIRTOOL),)
 MILL_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
-endif
 endif
 
 # Coverage support
 ifneq ($(FIRRTL_COVER),)
-ifeq ($(CHISEL_VERSION),3.6.1)
-MILL_ARGS += COVER=$(FIRRTL_COVER)
-else
 comma := ,
 splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
 MILL_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
-endif
 endif
 
 ifeq ($(filter gsim,$(MAKECMDGOALS)),gsim)
@@ -56,7 +42,7 @@ bootrom: $(BOOTROM_IMG)
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 
 $(TOP_V): $(SCALA_FILE) $(BOOTROM_IMG)
-	mill -i generator[$(CHISEL_VERSION)].runMain $(FUZZ_TOP) $(MILL_ARGS)
+	mill -i rocketchip.runMain $(FUZZ_TOP) $(MILL_ARGS)
 ifeq ($(CHISEL_TARGET),systemverilog)
 	@cp src/main/resources/vsrc/EICG_wrapper.v $(RTL_DIR)
 	@sed -i 's/UNOPTFLAT/LATCH/g' $(RTL_DIR)/EICG_wrapper.v
