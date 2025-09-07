@@ -24,6 +24,9 @@ MILL_ARGS += --target $(CHISEL_TARGET)
 ifeq ($(CHISEL_TARGET),systemverilog)
 MILL_ARGS += --split-verilog
 endif
+ifneq ($(FIRTOOL),)
+MILL_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
+endif
 endif
 
 # Coverage support
