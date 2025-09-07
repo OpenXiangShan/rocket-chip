@@ -31,7 +31,13 @@ endif
 
 # Coverage support
 ifneq ($(FIRRTL_COVER),)
+ifeq ($(CHISEL_VERSION),3.6.1)
 MILL_ARGS += COVER=$(FIRRTL_COVER)
+else
+comma := ,
+splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
+MILL_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
+endif
 endif
 
 ifeq ($(filter gsim,$(MAKECMDGOALS)),gsim)
