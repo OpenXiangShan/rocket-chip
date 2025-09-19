@@ -3,11 +3,16 @@
 package freechips.rocketchip.amba.axi4
 
 import chisel3._
-import chisel3.util._
+import chisel3.util.{Cat, log2Ceil}
+
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.util._
-import freechips.rocketchip.amba._
+
+import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+
+import freechips.rocketchip.amba.AMBACorrupt
+import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
+import freechips.rocketchip.resources.{DiplomaticSRAM, HasJustOneSeqMem}
+import freechips.rocketchip.util.{BundleMap, SeqMemToAugmentedSeqMem}
 
 /**
   * AXI4 slave device to provide a RAM storage
@@ -72,8 +77,8 @@ class AXI4RAM(
     val w_full = RegInit(false.B)
     val w_id   = Reg(UInt())
     val w_echo = Reg(BundleMap(in.params.echoFields))
-    val r_sel1 = RegNext(r_sel0)
-    val w_sel1 = RegNext(w_sel0)
+    val r_sel1 = Reg(Bool())
+    val w_sel1 = Reg(Bool())
 
     when (in. b.fire) { w_full := false.B }
     when (in.aw.fire) { w_full := true.B }

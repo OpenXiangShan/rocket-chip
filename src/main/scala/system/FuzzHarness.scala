@@ -6,6 +6,8 @@ import difftest.DifftestModule
 import freechips.rocketchip.devices.debug.{Debug, DebugModuleKey}
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.resources.BigIntHexContext
+import freechips.rocketchip.rocket.WithNBigCores
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.util.AsyncResetReg
 import org.chipsalliance.cde.config.{Config, Parameters}
@@ -27,8 +29,10 @@ class SimTop(implicit p: Parameters) extends Module {
   val ldut = LazyModule(new ExampleFuzzSystem)
   val dut = Module(ldut.module)
 
+  ldut.io_clocks.get.elements.values.foreach(_.clock := clock)
   // Allow the debug ndreset to reset the dut, but not until the initial reset has completed
-  dut.reset := (reset.asBool | ldut.debug.map { debug => AsyncResetReg(debug.ndreset) }.getOrElse(false.B)).asBool
+  val dut_reset = (reset.asBool | ldut.debug.map { debug => AsyncResetReg(debug.ndreset) }.getOrElse(false.B)).asBool
+  ldut.io_clocks.get.elements.values.foreach(_.reset := dut_reset)
 
   SimAXIMem.connectMem(ldut)
   val success = WireInit(false.B)
@@ -60,11 +64,10 @@ class FuzzConfig extends Config(
     case DebugModuleKey => None
     case CLINTKey => None
     case PLICKey => None
-    case BootROMLocated(InSubsystem) => Some(BootROMParams(
-      contentFileName = "./bootrom/bootrom.img",
+    case BootROMLocated(InSubsystem) => Seq(BootROMParams(
       address = 0x10000000,
       hang = 0x10000000,
-      withDTB = false,
+      appendDTB = false,
     ))
     case ExtMem => Some(MemoryPortParams(MasterPortParams(
       base = x"8000_0000",

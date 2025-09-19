@@ -4,11 +4,11 @@ import mill.scalalib._
 trait HasChisel
   extends ScalaModule {
   // Define these for building chisel from source
-  def chiselModule: Option[ScalaModule]
+  def chiselModule: Option[ScalaModule] = None
 
   override def moduleDeps = super.moduleDeps ++ chiselModule
 
-  def chiselPluginJar: T[Option[PathRef]]
+  def chiselPluginJar: T[Option[PathRef]] = None
 
   override def scalacOptions = T(super.scalacOptions() ++ chiselPluginJar().map(path => s"-Xplugin:${path.path}"))
 
@@ -37,13 +37,14 @@ trait RocketChipModule
   extends HasChisel {
   override def mainClass = T(Some("freechips.rocketchip.diplomacy.Main"))
 
+  def cdeModule: ScalaModule
+
   def macrosModule: MacrosModule
 
   // should be hardfloat/common.sc#HardfloatModule
   def hardfloatModule: ScalaModule
 
-  // should be cde/common.sc#CDEModule
-  def cdeModule: ScalaModule
+  def diplomacyModule: ScalaModule
 
   def difftestModule: ScalaModule
 
@@ -51,12 +52,12 @@ trait RocketChipModule
 
   def json4sJacksonIvy: Dep
 
-  override def moduleDeps = super.moduleDeps ++ Seq(macrosModule, hardfloatModule, cdeModule, difftestModule)
+  override def moduleDeps = super.moduleDeps ++ Seq(macrosModule, hardfloatModule, cdeModule, diplomacyModule, difftestModule)
 
   override def ivyDeps = T(
     super.ivyDeps() ++ Agg(
       mainargsIvy,
-      json4sJacksonIvy
+      json4sJacksonIvy,
     )
   )
 }

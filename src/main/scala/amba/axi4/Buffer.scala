@@ -4,8 +4,13 @@ package freechips.rocketchip.amba.axi4
 
 import chisel3._
 import chisel3.util.{Queue, IrrevocableIO}
+
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.diplomacy._
+
+import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+
+import freechips.rocketchip.diplomacy.BufferParams
+
 import scala.math.min
 
 /**
@@ -62,5 +67,17 @@ object AXI4Buffer
   {
     val axi4buf = LazyModule(new AXI4Buffer(aw, w, b, ar, r))
     axi4buf.node
+  }
+
+  def chain(depth: Int, name: Option[String] = None)(implicit p: Parameters): Seq[AXI4Node] = {
+    val buffers = Seq.fill(depth) { LazyModule(new AXI4Buffer()) }
+    name.foreach { n => buffers.zipWithIndex.foreach { case (b, i) => b.suggestName(s"${n}_${i}") } }
+    buffers.map(_.node)
+  }
+
+  def chainNode(depth: Int, name: Option[String] = None)(implicit p: Parameters): AXI4Node = {
+    chain(depth, name)
+      .reduceLeftOption(_ :*=* _)
+      .getOrElse(AXI4NameNode("no_buffer"))
   }
 }

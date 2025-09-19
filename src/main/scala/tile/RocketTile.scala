@@ -4,15 +4,31 @@
 package freechips.rocketchip.tile
 
 import chisel3._
+
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.TileCrossingParamsLike
-import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSinkParameters}
+import org.chipsalliance.diplomacy.lazymodule._
+
+import freechips.rocketchip.devices.tilelink.{BasicBusBlockerParams, BasicBusBlocker}
+import freechips.rocketchip.diplomacy.{
+  AddressSet, DisableMonitors, BufferParams
+}
+import freechips.rocketchip.resources.{
+  SimpleDevice, Description,
+  ResourceAnchors, ResourceBindings, ResourceBinding, Resource, ResourceAddress,
+}
+import freechips.rocketchip.interrupts.IntIdentityNode
+import freechips.rocketchip.tilelink.{TLIdentityNode, TLBuffer}
+import freechips.rocketchip.rocket.{
+  RocketCoreParams, ICacheParams, DCacheParams, BTBParams, HasHellaCache,
+  HasICacheFrontend, ScratchpadSlavePort, HasICacheFrontendModule, Rocket
+}
+import freechips.rocketchip.subsystem.HierarchicalElementCrossingParamsLike
+import freechips.rocketchip.prci.{ClockSinkParameters, RationalCrossing, ClockCrossingType}
+import freechips.rocketchip.util.InOrderArbiter
+import freechips.rocketchip.trace.{TraceEncoderParams,TraceEncoderController, TraceSinkArbiter}
+import freechips.rocketchip.subsystem._
+
+import freechips.rocketchip.util.BooleanToAugmentedBoolean
 
 case class RocketTileBoundaryBufferParams(force: Boolean = false)
 
@@ -22,16 +38,18 @@ case class RocketTileParams(
     dcache: Option[DCacheParams] = Some(DCacheParams()),
     btb: Option[BTBParams] = Some(BTBParams()),
     dataScratchpadBytes: Int = 0,
-    name: Option[String] = Some("tile"),
-    hartId: Int = 0,
+    tileId: Int = 0,
     beuAddr: Option[BigInt] = None,
     blockerCtrlAddr: Option[BigInt] = None,
     clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
-    boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
-    ) extends InstantiableTileParams[RocketTile] {
+    boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None,
+    traceParams: Option[TraceEncoderParams] = None
+  ) extends InstantiableTileParams[RocketTile] {
   require(icache.isDefined)
   require(dcache.isDefined)
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): RocketTile = {
+  val baseName = "rockettile"
+  val uniqueName = s"${baseName}_$tileId"
+  def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): RocketTile = {
     new RocketTile(this, crossing, lookup)
   }
 }
@@ -49,10 +67,10 @@ class RocketTile private(
     with HasICacheFrontend
 {
   // Private constructor ensures altered LazyModule.p is used implicitly
-  def this(params: RocketTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
+  def this(params: RocketTileParams, crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
-  val intOutwardNode = IntIdentityNode()
+  val intOutwardNode = rocketParams.beuAddr map { _ => IntIdentityNode() }
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
@@ -62,10 +80,31 @@ class RocketTile private(
   dtim_adapter.foreach(lm => connectTLSlave(lm.node, lm.node.portParams.head.beatBytes))
 
   val bus_error_unit = rocketParams.beuAddr map { a =>
-    val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
-    intOutwardNode := beu.intNode
+    val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a), xLen/8))
+    intOutwardNode.get := beu.intNode
     connectTLSlave(beu.node, xBytes)
     beu
+  }
+
+  /**
+   * A Centralized Trace encoder controller,
+   * controlling enable/disable of trace encoder
+   * and selecting trace sink
+   */
+  val trace_encoder_controller = rocketParams.traceParams.map { t =>
+    val trace_encoder_controller = LazyModule(new TraceEncoderController(t.encoderBaseAddr, xBytes))
+    connectTLSlave(trace_encoder_controller.node, xBytes)
+    trace_encoder_controller
+  }
+
+  val trace_encoder = rocketParams.traceParams match {
+    case Some(t) => Some(t.buildEncoder(p))
+    case None => None
+  }
+
+  val (trace_sinks, traceSinkIds) = rocketParams.traceParams match {
+    case Some(t) => t.buildSinks.map {_(p)}.unzip
+    case None => (Nil, Nil)
   }
 
   val tile_master_blocker =
@@ -80,7 +119,7 @@ class RocketTile private(
   masterNode :=* tlOtherMastersNode
   DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
 
-  nDCachePorts += 1 /*core */ + (dtim_adapter.isDefined).toInt
+  nDCachePorts += 1 /*core */ + (dtim_adapter.isDefined).toInt + rocketParams.core.vector.map(_.useDCache.toInt).getOrElse(0)
 
   val dtimProperty = dtim_adapter.map(d => Map(
     "sifive,dtim" -> d.device.asProperty)).getOrElse(Nil)
@@ -99,8 +138,13 @@ class RocketTile private(
     }
   }
 
+  val vector_unit = rocketParams.core.vector.map(v => LazyModule(v.build(p)))
+  vector_unit.foreach(vu => tlMasterXbar.node :=* vu.atlNode)
+  vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
+
+
   ResourceBinding {
-    Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
+    Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
   override lazy val module = new RocketTileModuleImp(this)
@@ -122,12 +166,38 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
     with HasFpuOpt
     with HasLazyRoCCModule
     with HasICacheFrontendModule {
-  Annotated.params(this, outer.rocketParams)
-
   val core = Module(new Rocket(outer)(outer.p))
+  outer.vector_unit.foreach { v =>
+    core.io.vector.get <> v.module.io.core
+    v.module.io.tlb <> outer.dcache.module.io.tlb_port
+  }
 
   // reset vector is connected in the Frontend to s2_pc
   core.io.reset_vector := DontCare
+
+  if (outer.rocketParams.traceParams.isDefined) {
+    core.io.trace_core_ingress.get <> outer.trace_encoder.get.module.io.in
+    outer.trace_encoder_controller.foreach { lm =>
+      outer.trace_encoder.get.module.io.control <> lm.module.io.control
+    }
+
+    val trace_sink_arbiter = Module(new TraceSinkArbiter(outer.traceSinkIds, 
+      use_monitor = outer.rocketParams.traceParams.get.useArbiterMonitor, 
+      monitor_name = outer.rocketParams.uniqueName))
+
+    trace_sink_arbiter.io.target := outer.trace_encoder.get.module.io.control.target
+    trace_sink_arbiter.io.in <> outer.trace_encoder.get.module.io.out 
+
+
+    core.io.traceStall := outer.traceAuxSinkNode.bundle.stall || outer.trace_encoder.get.module.io.stall
+
+    outer.trace_sinks.zip(outer.traceSinkIds).foreach { case (sink, id) =>
+      val index = outer.traceSinkIds.indexOf(id)
+      sink.module.io.trace_in <> trace_sink_arbiter.io.out(index)
+    }
+  } else {
+    core.io.traceStall := outer.traceAuxSinkNode.bundle.stall
+  }
 
   // Report unrecoverable error conditions; for now the only cause is cache ECC errors
   outer.reportHalt(List(outer.dcache.module.io.errors))
@@ -149,11 +219,11 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
     beu.module.io.errors.icache := outer.frontend.module.io.errors
   }
 
-  core.io.interrupts.nmi.foreach { nmi => nmi := outer.nmiSinkNode.bundle }
+  core.io.interrupts.nmi.foreach { nmi => nmi := outer.nmiSinkNode.get.bundle }
 
   // Pass through various external constants and reports that were bundle-bridged into the tile
   outer.traceSourceNode.bundle <> core.io.trace
-  core.io.traceStall := outer.traceAuxSinkNode.bundle.stall
+  
   outer.bpwatchSourceNode.bundle <> core.io.bpwatch
   core.io.hartid := outer.hartIdSinkNode.bundle
   require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
@@ -164,12 +234,15 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
   dcachePorts += core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??
   fpuOpt foreach { fpu =>
     core.io.fpu :<>= fpu.io.waiveAs[FPUCoreIO](_.cp_req, _.cp_resp)
-    fpu.io.cp_req := DontCare
-    fpu.io.cp_resp := DontCare
   }
   if (fpuOpt.isEmpty) {
     core.io.fpu := DontCare
   }
+  outer.vector_unit foreach { v => if (outer.rocketParams.core.vector.get.useDCache) {
+    dcachePorts += v.module.io.dmem
+  } else {
+    v.module.io.dmem := DontCare
+  } }
   core.io.ptw <> ptw.io.dpath
 
   // Connect the coprocessor interfaces
@@ -213,4 +286,27 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
 
 trait HasFpuOpt { this: RocketTileModuleImp =>
   val fpuOpt = outer.tileParams.core.fpu.map(params => Module(new FPU(params)(outer.p)))
+  fpuOpt.foreach { fpu =>
+    val nRoCCFPUPorts = outer.roccs.count(_.usesFPU)
+    val nFPUPorts = nRoCCFPUPorts + outer.rocketParams.core.useVector.toInt
+    if (nFPUPorts > 0) {
+      val fpArb = Module(new InOrderArbiter(new FPInput()(outer.p), new FPResult()(outer.p), nFPUPorts))
+      fpu.io.cp_req <> fpArb.io.out_req
+      fpArb.io.out_resp <> fpu.io.cp_resp
+
+      val fp_rocc_ios = outer.roccs.filter(_.usesFPU).map(_.module.io)
+      for (i <- 0 until nRoCCFPUPorts) {
+        fpArb.io.in_req(i) <> fp_rocc_ios(i).fpu_req
+        fp_rocc_ios(i).fpu_resp <> fpArb.io.in_resp(i)
+      }
+      outer.vector_unit.foreach(vu => {
+        fpArb.io.in_req(nRoCCFPUPorts) <> vu.module.io.fp_req
+        vu.module.io.fp_resp <> fpArb.io.in_resp(nRoCCFPUPorts)
+      })
+    } else {
+      fpu.io.cp_req.valid := false.B
+      fpu.io.cp_req.bits := DontCare
+      fpu.io.cp_resp.ready := false.B
+    }
+  }
 }

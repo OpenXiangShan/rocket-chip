@@ -4,8 +4,11 @@ package freechips.rocketchip.amba.apb
 
 import chisel3._
 import chisel3.experimental.SourceInfo
+
 import org.chipsalliance.cde.config.{Parameters, Field}
-import freechips.rocketchip.diplomacy._
+
+import org.chipsalliance.diplomacy.ValName
+import org.chipsalliance.diplomacy.nodes.{SimpleNodeImp,RenderedEdge, InwardNode, OutwardNode, SourceNode, SinkNode, NexusNode, IdentityNode}
 
 case object APBMonitorBuilder extends Field[APBMonitorArgs => APBMonitorBase]
 
@@ -18,7 +21,7 @@ object APBImp extends SimpleNodeImp[APBMasterPortParameters, APBSlavePortParamet
   override def monitor(bundle: APBBundle, edge: APBEdgeParameters): Unit = {
     edge.params.lift(APBMonitorBuilder).foreach { builder =>
       val monitor = Module(builder(APBMonitorArgs(edge)))
-      monitor.io.in := bundle
+      monitor.io.in :#= bundle
     }
   }
 

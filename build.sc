@@ -3,16 +3,21 @@ import mill.scalalib._
 import mill.scalalib.publish._
 import common.HasChisel
 import coursier.maven.MavenRepository
-import $file.hardfloat.common
-import $file.cde.common
+import $file.dependencies.hardfloat.common
+import $file.dependencies.cde.common
+import $file.dependencies.diplomacy.common
 import $file.common
 
 object v {
-  val scala = "2.13.10"
+  val scala = "2.13.12"
   val chisel = (ivy"org.chipsalliance::chisel:6.7.0", ivy"org.chipsalliance:::chisel-plugin:6.7.0")
   val mainargs = ivy"com.lihaoyi::mainargs:0.5.0"
   val json4sJackson = ivy"org.json4s::json4s-jackson:4.0.5"
   val scalaReflect = ivy"org.scala-lang:scala-reflect:${scala}"
+  val sourcecode = ivy"com.lihaoyi::sourcecode:0.3.1"
+  val sonatypesSnapshots = Seq(
+    MavenRepository("https://s01.oss.sonatype.org/content/repositories/snapshots")
+  )
 }
 
 object macros extends Macros
@@ -30,12 +35,12 @@ trait Macros
 object hardfloat extends Hardfloat
 
 trait Hardfloat
-  extends $file.hardfloat.common.HardfloatModule
+  extends $file.dependencies.hardfloat.common.HardfloatModule
     with RocketChipPublishModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "hardfloat" / "hardfloat"
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "dependencies" / "hardfloat" / "hardfloat"
 
   def chiselModule = None
 
@@ -49,13 +54,36 @@ trait Hardfloat
 object cde extends CDE
 
 trait CDE
-  extends $file.cde.common.CDEModule
+  extends $file.dependencies.cde.common.CDEModule
     with RocketChipPublishModule
     with ScalaModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "cde" / "cde"
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "dependencies" / "cde" / "cde"
+}
+
+object diplomacy extends Diplomacy
+
+trait Diplomacy
+    extends $file.dependencies.diplomacy.common.DiplomacyModule
+    with RocketChipPublishModule {
+
+  override def scalaVersion: T[String] = T(v.scala)
+
+  override def millSourcePath = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "dependencies" / "diplomacy" / "diplomacy"
+
+  def chiselModule = None
+  def chiselPluginJar = None
+
+  // use chisel from ivy
+  def chiselIvy = Some(v.chisel._1)
+  def chiselPluginIvy = Some(v.chisel._2)
+
+  // use CDE from source until published to sonatype
+  def cdeModule = cde
+
+  def sourcecodeIvy = v.sourcecode
 }
 
 trait Difftest
@@ -88,10 +116,6 @@ trait RocketChip
 
   override def millSourcePath = super.millSourcePath / os.up
 
-  def chiselModule = None
-
-  def chiselPluginJar = None
-
   def chiselIvy = Some(v.chisel._1)
 
   def chiselPluginIvy = Some(v.chisel._2)
@@ -104,9 +128,15 @@ trait RocketChip
 
   def difftestModule = difftest
 
+  def diplomacyModule = diplomacy
+
+  def diplomacyIvy = None
+
   def mainargsIvy = v.mainargs
 
   def json4sJacksonIvy = v.json4sJackson
+
+  def repositoriesTask = T.task(super.repositoriesTask() ++ v.sonatypesSnapshots)
 }
 
 trait RocketChipPublishModule
@@ -152,6 +182,35 @@ trait Emulator extends Cross.Module2[String, String] {
     }
   }
 
+  object litexgenerate extends Module {
+    def compile = T {
+      os.proc("firtool",
+        generator.chirrtl().path,
+        s"--annotation-file=${generator.chiselAnno().path}",
+        "--disable-annotation-unknown",
+        "-dedup",
+        "-O=debug",
+        "--split-verilog",
+        "--preserve-values=named",
+        "--output-annotation-file=mfc.anno.json",
+        "--lowering-options=disallowLocalVariables",
+        s"-o=${T.dest}"
+      ).call(T.dest)
+      PathRef(T.dest)
+    }
+
+    def rtls = T {
+      os.read(compile().path / "filelist.f").split("\n").map(str =>
+        try {
+          os.Path(str)
+        } catch {
+          case e: IllegalArgumentException if e.getMessage.contains("is not an absolute path") =>
+            compile().path / str.stripPrefix("./")
+        }
+      ).filter(p => p.ext == "v" || p.ext == "sv").map(PathRef(_)).toSeq
+    }
+  }
+
   object mfccompiler extends Module {
     def compile = T {
       os.proc("firtool",
@@ -189,6 +248,7 @@ object emulator extends Cross[Emulator](
   ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultBufferlessConfig"),
   // RocketSuiteC
   ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.TinyConfig"),
+
   // Unittest
   ("freechips.rocketchip.unittest.TestHarness", "freechips.rocketchip.unittest.AMBAUnitTestConfig"),
   ("freechips.rocketchip.unittest.TestHarness", "freechips.rocketchip.unittest.TLSimpleUnitTestConfig"),
@@ -216,6 +276,40 @@ object emulator extends Cross[Emulator](
   //
   ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultRV32Config"),
   ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultFP16Config"),
-  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.BitManipCryptoConfig"),
-  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.BitManipCrypto32Config"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultBConfig"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultRV32BConfig"),
+
+  // Litex
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall1x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall1x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall1x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall1x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall2x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall2x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall2x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall2x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall4x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall4x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall4x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall4x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall8x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall8x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall8x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigSmall8x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig1x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig1x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig1x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig1x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig2x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig2x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig2x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig2x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig4x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig4x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig4x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig4x8"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig8x1"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig8x2"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig8x4"),
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.LitexConfigBig8x8"),
 )
