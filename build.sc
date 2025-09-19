@@ -9,8 +9,8 @@ import $file.dependencies.diplomacy.common
 import $file.common
 
 object v {
-  val scala = "2.13.12"
-  val chisel = (ivy"org.chipsalliance::chisel:6.7.0", ivy"org.chipsalliance:::chisel-plugin:6.7.0")
+  val scala = "2.13.16"
+  val chisel = (ivy"org.chipsalliance::chisel:7.0.0", ivy"org.chipsalliance:::chisel-plugin:7.0.0")
   val mainargs = ivy"com.lihaoyi::mainargs:0.5.0"
   val json4sJackson = ivy"org.json4s::json4s-jackson:4.0.5"
   val scalaReflect = ivy"org.scala-lang:scala-reflect:${scala}"
