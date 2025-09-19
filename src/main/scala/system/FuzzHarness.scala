@@ -24,6 +24,7 @@ class ExampleFuzzSystem(implicit p: Parameters) extends RocketSubsystem
 }
 
 class ExampleFuzzSystemImp[+L <: ExampleFuzzSystem](_outer: L) extends RocketSubsystemModuleImp(_outer)
+  with HasRTCModuleImp
 
 class SimTop(implicit p: Parameters) extends Module {
   val ldut = LazyModule(new ExampleFuzzSystem)
@@ -59,11 +60,10 @@ class FuzzConfig extends Config(
       ))
     }
   }) ++
+  new WithNExtTopInterrupts(0) ++
   new WithCoherentBusTopology ++
   new BaseConfig().alter((site, _, up) => {
     case DebugModuleKey => None
-    case CLINTKey => None
-    case PLICKey => None
     case BootROMLocated(InSubsystem) => Seq(BootROMParams(
       address = 0x10000000,
       hang = 0x10000000,
