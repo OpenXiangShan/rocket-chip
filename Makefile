@@ -26,7 +26,7 @@ splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
 MILL_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
 endif
 
-ifeq ($(filter gsim,$(MAKECMDGOALS)),gsim)
+ifeq ($(GSIM),1)
 MILL_ARGS += --dump-fir --difftest-config G
 endif
 
@@ -56,9 +56,6 @@ sim-verilog: $(TOP_V)
 
 emu: sim-verilog
 	@$(MAKE) -C difftest emu WITH_CHISELDB=0 WITH_CONSTANTIN=0 RTL_SUFFIX=$(RTL_SUFFIX)
-
-gsim: sim-verilog
-	@$(MAKE) -C difftest gsim WITH_CHISELDB=0 WITH_CONSTANTIN=0 RTL_SUFFIX=$(RTL_SUFFIX)
 
 clean:
 	rm -rf $(BUILD_DIR)
