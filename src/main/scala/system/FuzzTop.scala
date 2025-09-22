@@ -12,6 +12,7 @@ object FuzzMain {
     })) ++ firtoolOptions
     (new ChiselStage).execute(chiselArgs, generator
       :+ FirtoolOption("--disable-annotation-unknown")
+      :+ FirtoolOption("--default-layer-specialization=enable")
     )
   }
 }
