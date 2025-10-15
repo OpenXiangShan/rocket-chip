@@ -38,18 +38,18 @@ case class DebugAttachParams(
 
 case object ExportDebug extends Field(DebugAttachParams())
 
-class ClockedAPBBundle(params: APBBundleParameters) extends APBBundle(params) {
+class ClockedAPBBundle(params: APBBundleParameters, asyncReset: Boolean = false) extends APBBundle(params) {
   val clock = Clock()
-  val reset = Reset()
+  val reset = if (asyncReset) AsyncReset() else Reset()
 }
 
 
-class DebugIO(implicit val p: Parameters) extends Bundle {
+class DebugIO(asyncReset: Boolean = false)(implicit val p: Parameters) extends Bundle {
   val clock = Input(Clock())
-  val reset = Input(Reset())
-  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO()))
-  val systemjtag = p(ExportDebug).jtag.option(new SystemJTAGIO)
-  val apb = p(ExportDebug).apb.option(Flipped(new ClockedAPBBundle(APBBundleParameters(addrBits=12, dataBits=32))))
+  val reset = Input(if (asyncReset) AsyncReset() else Reset())
+  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO(asyncReset)))
+  val systemjtag = p(ExportDebug).jtag.option(new SystemJTAGIO(asyncReset))
+  val apb = p(ExportDebug).apb.option(Flipped(new ClockedAPBBundle(APBBundleParameters(addrBits=12, dataBits=32), asyncReset)))
   //------------------------------
   val ndreset    = Output(Bool())
   val dmactive   = Output(Bool())
