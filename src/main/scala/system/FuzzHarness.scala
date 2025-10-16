@@ -2,7 +2,7 @@ package freechips.rocketchip.system
 
 
 import chisel3._
-import difftest.DifftestModule
+import difftest.HasDiffTestInterfaces
 import freechips.rocketchip.devices.debug.{Debug, DebugModuleKey}
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -26,7 +26,7 @@ class ExampleFuzzSystem(implicit p: Parameters) extends RocketSubsystem
 class ExampleFuzzSystemImp[+L <: ExampleFuzzSystem](_outer: L) extends RocketSubsystemModuleImp(_outer)
   with HasRTCModuleImp
 
-class SimTop(implicit p: Parameters) extends Module {
+class ExampleFuzzSystemSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val ldut = LazyModule(new ExampleFuzzSystem)
   val dut = Module(ldut.module)
 
@@ -42,7 +42,7 @@ class SimTop(implicit p: Parameters) extends Module {
   ldut.module.meip.foreach(_.foreach(_ := false.B))
   ldut.module.seip.foreach(_.foreach(_ := false.B))
 
-  val difftest = DifftestModule.finish("rocket-chip")
+  override def cpuName: Option[String] = Some("ROCKET_CHIP")
 }
 
 class FuzzConfig extends Config(

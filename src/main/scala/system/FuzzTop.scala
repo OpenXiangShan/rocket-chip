@@ -8,7 +8,7 @@ object FuzzMain {
   def main(args: Array[String]): Unit = {
     val (chiselArgs, firtoolOptions) = DifftestModule.parseArgs(args)
     val generator = Seq(ChiselGeneratorAnnotation(() => {
-      freechips.rocketchip.diplomacy.DisableMonitors(p => new SimTop()(p))(new FuzzConfig)
+      freechips.rocketchip.diplomacy.DisableMonitors(p => DifftestModule.top(new ExampleFuzzSystemSim()(p)))(new FuzzConfig)
     })) ++ firtoolOptions
     (new ChiselStage).execute(chiselArgs, generator
       :+ FirtoolOption("--disable-annotation-unknown")
