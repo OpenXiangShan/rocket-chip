@@ -6,28 +6,29 @@ RTL_SUFFIX = sv
 TOP_V      = $(RTL_DIR)/SimTop.$(RTL_SUFFIX)
 TOP_FIR    = $(RTL_DIR)/SimTop.fir
 
-MILL_ARGS = --target-dir $(RTL_DIR) \
-            --full-stacktrace
+CHISEL_ARGS = --target-dir $(RTL_DIR) \
+              --full-stacktrace       \
+              $(MILL_ARGS)
 
 CHISEL_TARGET ?= systemverilog
-MILL_ARGS += --target $(CHISEL_TARGET)
+CHISEL_ARGS += --target $(CHISEL_TARGET)
 ifeq ($(CHISEL_TARGET),systemverilog)
-MILL_ARGS += --split-verilog
+CHISEL_ARGS += --split-verilog
 endif
 
 ifneq ($(FIRTOOL),)
-MILL_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
+CHISEL_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
 endif
 
 # Coverage support
 ifneq ($(FIRRTL_COVER),)
 comma := ,
 splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
-MILL_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
+CHISEL_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
 endif
 
 ifeq ($(GSIM),1)
-MILL_ARGS += --dump-fir --difftest-config G
+CHISEL_ARGS += --dump-fir --difftest-config G
 endif
 
 BOOTROM_DIR = $(abspath ./bootrom)
@@ -42,7 +43,7 @@ bootrom: $(BOOTROM_IMG)
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 
 $(TOP_V): $(SCALA_FILE) $(BOOTROM_IMG)
-	mill -i rocketchip.runMain $(FUZZ_TOP) $(MILL_ARGS)
+	mill -i rocketchip.runMain $(FUZZ_TOP) $(CHISEL_ARGS)
 ifeq ($(CHISEL_TARGET),systemverilog)
 	@cp src/main/resources/vsrc/EICG_wrapper.v $(RTL_DIR)
 	@sed -i 's/UNOPTFLAT/LATCH/g' $(RTL_DIR)/EICG_wrapper.v
@@ -55,13 +56,16 @@ endif
 sim-verilog: $(TOP_V)
 
 emu: sim-verilog
-	@$(MAKE) -C difftest emu WITH_CHISELDB=0 WITH_CONSTANTIN=0 RTL_SUFFIX=$(RTL_SUFFIX)
+	@$(MAKE) -C difftest emu WITH_CHISELDB=0 WITH_CONSTANTIN=0
+
+simv: sim-verilog
+	@$(MAKE) -C difftest simv WITH_CHISELDB=0 WITH_CONSTANTIN=0
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-idea:
-	mill -i mill.idea.GenIdea/idea
+bsp:
+	mill -i mill.bsp.BSP/install
 
 init:
 	git submodule update --init
