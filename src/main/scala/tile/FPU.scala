@@ -8,7 +8,7 @@ import chisel3.util._
 import chisel3.{DontCare, WireInit, withClock, withReset}
 import chisel3.experimental.SourceInfo
 import chisel3.experimental.dataview._
-import difftest.{DiffArchFpDelayedUpdate, DiffArchFpRegState, DiffFpWriteback, DifftestModule}
+import difftest.{DiffArchFpDelayedUpdate, DiffPhyFpRegState, DifftestModule}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
@@ -814,12 +814,6 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     i.wrenx := false.B
     i.wrenf := false.B
     i.excpt := false.B
-
-    val difftest = DifftestModule(new DiffFpWriteback)
-    difftest.coreid := 0.U
-    difftest.valid := i.wrenf
-    difftest.address := i.wrdst
-    difftest.data := i.wrdata
   }
 
   // regfile
@@ -1066,7 +1060,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     io.ll_resp_val // load writeback
 
   if (true) {
-    val difftest = DifftestModule(new DiffArchFpRegState)
+    val difftest = DifftestModule(new DiffPhyFpRegState(32))
     difftest.coreid := 0.U
     difftest.value  := (0 until 32).map(i => ieee(regfile(i)))
     // Initialize the regfile with meaningful values to avoid mismatch between the recode and IEEE 754 formats.

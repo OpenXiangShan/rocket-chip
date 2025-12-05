@@ -837,16 +837,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
                  wb_reg_wdata))))
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
   if (true) {
-    val difftest = DifftestModule(new DiffArchIntRegState)
+    val difftest = DifftestModule(new DiffPhyIntRegState(32))
     difftest.coreid := 0.U
     difftest.value  := rf.values
-  }
-  if (true) {
-    val difftest = DifftestModule(new DiffIntWriteback)
-    difftest.coreid := 0.U
-    difftest.valid := rf_wen
-    difftest.address := rf_waddr
-    difftest.data := rf_wdata
   }
 
   if (rocketParams.enableTraceCoreIngress) {
