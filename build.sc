@@ -141,7 +141,6 @@ trait Emulator extends Cross.Module2[String, String] {
       os.proc("firtool",
         generator.chirrtl().path,
         s"--annotation-file=${generator.chiselAnno().path}",
-        "-disable-infer-rw",
         "--disable-annotation-unknown",
         "-dedup",
         "-O=debug",
@@ -249,8 +248,18 @@ trait Emulator extends Cross.Module2[String, String] {
     }
 
     def elf = T.persistent {
-      mill.util.Jvm.runSubprocess(Seq("cmake", "-G", "Ninja", "-S", cmakefileLists().path, "-B", T.dest.toString).map(_.toString), Map[String, String](), T.dest)
-      mill.util.Jvm.runSubprocess(Seq("ninja", "-C", T.dest).map(_.toString), Map[String, String](), T.dest)
+      val hasNinja = os.proc("sh", "-c", "command -v ninja >/dev/null 2>&1").call(cwd = T.dest, check = false).exitCode == 0
+      val generator = sys.env.getOrElse("CMAKE_GENERATOR", if (hasNinja) "Ninja" else "Unix Makefiles")
+      val cmakeCache = T.dest / "CMakeCache.txt"
+      val cmakeFiles = T.dest / "CMakeFiles"
+      if (os.exists(cmakeCache)) os.remove(cmakeCache)
+      if (os.exists(cmakeFiles)) os.remove.all(cmakeFiles)
+      mill.util.Jvm.runSubprocess(
+        Seq("cmake", "-G", generator, "-S", cmakefileLists().path, "-B", T.dest.toString).map(_.toString),
+        Map[String, String](),
+        T.dest
+      )
+      mill.util.Jvm.runSubprocess(Seq("cmake", "--build", T.dest.toString).map(_.toString), Map[String, String](), T.dest)
       PathRef(T.dest / "emulator")
     }
   }

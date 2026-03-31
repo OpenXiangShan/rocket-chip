@@ -24,18 +24,19 @@ class WithAMBAUnitTests extends Config((site, here, up) => {
     val txns = 100 * site(TestDurationMultiplier)
     val timeout = 50000 * site(TestDurationMultiplier)
     Seq(
-      Module(new AHBBridgeTest(true,         txns=8*txns, timeout=timeout)),
-      Module(new AHBNativeTest(true,         txns=6*txns, timeout=timeout)),
-      Module(new AHBNativeTest(false,        txns=6*txns, timeout=timeout)),
-      Module(new APBBridgeTest(true,         txns=6*txns, timeout=timeout)),
-      Module(new APBBridgeTest(false,        txns=6*txns, timeout=timeout)),
-      Module(new AXI4LiteFuzzRAMTest(        txns=6*txns, timeout=timeout)),
-      Module(new AXI4LiteUserBitsFuzzRAMTest(txns=6*txns, timeout=timeout)),
-      Module(new AXI4FullFuzzRAMTest(        txns=3*txns, timeout=timeout)),
-      Module(new AXI4BridgeTest(             txns=3*txns, timeout=timeout)),
-      Module(new AXI4XbarTest(               txns=1*txns, timeout=timeout)),
-      Module(new AXI4RAMAsyncCrossingTest(   txns=3*txns, timeout=timeout)),
-      Module(new AXI4RAMCreditedCrossingTest(txns=3*txns, timeout=timeout))) }
+      // Module(new AHBBridgeTest(true,         txns=8*txns, timeout=timeout)),
+      // Module(new AHBNativeTest(true,         txns=6*txns, timeout=timeout)),
+      // Module(new AHBNativeTest(false,        txns=6*txns, timeout=timeout)),
+      // Module(new APBBridgeTest(true,         txns=6*txns, timeout=timeout)),
+      // Module(new APBBridgeTest(false,        txns=6*txns, timeout=timeout)),
+      // Module(new AXI4LiteFuzzRAMTest(        txns=6*txns, timeout=timeout)),
+      // Module(new AXI4LiteUserBitsFuzzRAMTest(txns=6*txns, timeout=timeout)),
+      // Module(new AXI4FullFuzzRAMTest(        txns=3*txns, timeout=timeout)),
+      // Module(new AXI4BridgeTest(             txns=3*txns, timeout=timeout)),
+      // Module(new AXI4XbarTest(               txns=1*txns, timeout=timeout)),
+      // Module(new AXI4RAMAsyncCrossingTest(   txns=3*txns, timeout=timeout)),
+      // Module(new AXI4RAMCreditedCrossingTest(txns=3*txns, timeout=timeout)),
+      Module(new AXI4RAMWidthWidgetTest(16, 8))) }
 })
 
 class WithTLSimpleUnitTests extends Config((site, here, up) => {

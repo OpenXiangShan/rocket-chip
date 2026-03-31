@@ -378,7 +378,9 @@ sealed trait LazyModuleImpLike extends RawModule {
     }
 
     if (wrapper.shouldBeInlined) {
-      chisel3.experimental.annotate(this)(Seq(firrtl.passes.InlineAnnotation(toNamed)))
+      chisel3.experimental.annotate(new chisel3.experimental.ChiselAnnotation {
+        override def toFirrtl = firrtl.passes.InlineAnnotation(toNamed)
+      })
     }
 
     // Return [[IO]] and [[Dangle]] of this [[LazyModuleImp]].
