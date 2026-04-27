@@ -10,7 +10,7 @@ import $file.common
 
 object v {
   val scala = "2.13.16"
-  val chisel = (ivy"org.chipsalliance::chisel:7.3.0", ivy"org.chipsalliance:::chisel-plugin:7.3.0")
+  val chisel = (ivy"org.chipsalliance::chisel:7.11.0", ivy"org.chipsalliance:::chisel-plugin:7.11.0")
   val mainargs = ivy"com.lihaoyi::mainargs:0.5.0"
   val json4sJackson = ivy"org.json4s::json4s-jackson:4.0.5"
   val scalaReflect = ivy"org.scala-lang:scala-reflect:${scala}"
