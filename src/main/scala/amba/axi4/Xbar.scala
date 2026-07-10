@@ -49,7 +49,7 @@ class AXI4Xbar(
       )
     }
   ){
-    override def circuitIdentity = outputs == 1 && inputs == 1
+    override def circuitIdentity = outputs.size == 1 && inputs.size == 1
   }
 
   lazy val module = new Impl
