@@ -7,21 +7,22 @@ import $file.cde.common
 import $file.common
 
 object v {
-  val scala = "2.13.10"
+  val scala = "2.13.17"
   // the first version in this Map is the mainly supported version which will be used to run tests
   val chiselCrossVersions = Map(
-    "3.6.0" -> (ivy"edu.berkeley.cs::chisel3:3.6.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0"),
-    "5.0.0" -> (ivy"org.chipsalliance::chisel:5.0.0", ivy"org.chipsalliance:::chisel-plugin:5.0.0"),
+    "7.13.0" -> (mvn"org.chipsalliance::chisel:7.13.0", mvn"org.chipsalliance:::chisel-plugin:7.13.0")
   )
-  val mainargs = ivy"com.lihaoyi::mainargs:0.5.0"
-  val json4sJackson = ivy"org.json4s::json4s-jackson:4.0.5"
-  val scalaReflect = ivy"org.scala-lang:scala-reflect:${scala}"
+  val mainargs = mvn"com.lihaoyi::mainargs:0.5.0"
+  val json4sJackson = mvn"org.json4s::json4s-jackson:4.0.5"
+  val scalaReflect = mvn"org.scala-lang:scala-reflect:${scala}"
 }
+
+val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
 object macros extends Macros
 
 trait Macros
-  extends millbuild.common.MacrosModule
+  extends build_.common.MacrosModule
     with RocketChipPublishModule
     with SbtModule {
 
@@ -33,13 +34,13 @@ trait Macros
 object hardfloat extends mill.define.Cross[Hardfloat](v.chiselCrossVersions.keys.toSeq)
 
 trait Hardfloat
-  extends millbuild.hardfloat.common.HardfloatModule
+  extends build_.hardfloat.common.HardfloatModule
     with RocketChipPublishModule
     with Cross.Module[String] {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.pwd / "hardfloat" / "hardfloat"
+  override def millSourcePath = pwd / "hardfloat" / "hardfloat"
 
   def chiselModule = None
 
@@ -53,19 +54,19 @@ trait Hardfloat
 object cde extends CDE
 
 trait CDE
-  extends millbuild.cde.common.CDEModule
+  extends build_.cde.common.CDEModule
     with RocketChipPublishModule
     with ScalaModule {
 
   def scalaVersion: T[String] = T(v.scala)
 
-  override def millSourcePath = os.pwd / "cde" / "cde"
+  override def millSourcePath = pwd / "cde" / "cde"
 }
 
 object rocketchip extends Cross[RocketChip](v.chiselCrossVersions.keys.toSeq)
 
 trait RocketChip
-  extends millbuild.common.RocketChipModule
+  extends build_.common.RocketChipModule
     with RocketChipPublishModule
     with SbtModule
     with Cross.Module[String] {
@@ -171,11 +172,11 @@ trait Emulator extends Cross.Module2[String, String] {
     }
 
     def csrcDir = T {
-      PathRef(os.pwd / "src" / "main" / "resources" / "csrc")
+      PathRef(pwd / "src" / "main" / "resources" / "csrc")
     }
 
     def vsrcDir = T {
-      PathRef(os.pwd / "src" / "main" / "resources" / "vsrc")
+      PathRef(pwd / "src" / "main" / "resources" / "vsrc")
     }
 
     def allCSourceFiles = T {
@@ -203,7 +204,7 @@ trait Emulator extends Cross.Module2[String, String] {
          |set(CMAKE_C_COMPILER "clang")
          |set(CMAKE_CXX_COMPILER "clang++")
          |set(CMAKE_CXX_FLAGS
-         |"$${CMAKE_CXX_FLAGS} -DVERILATOR -DTEST_HARNESS=VTestHarness -include VTestHarness.h -include verilator.h -include ${generator.elaborate().path / config + ".plusArgs"}")
+         |"$${CMAKE_CXX_FLAGS} -DVERILATOR -DTEST_HARNESS=VTestHarness -include VTestHarness.h -include verilator.h -include ${(generator.elaborate().path / config).toString() + ".plusArgs"}")
          |set(THREADS_PREFER_PTHREAD_FLAG ON)
          |
          |find_package(verilator)
@@ -249,8 +250,8 @@ trait Emulator extends Cross.Module2[String, String] {
     }
 
     def elf = T.persistent {
-      mill.util.Jvm.runSubprocess(Seq("cmake", "-G", "Ninja", "-S", cmakefileLists().path, "-B", T.dest.toString).map(_.toString), Map[String, String](), T.dest)
-      mill.util.Jvm.runSubprocess(Seq("ninja", "-C", T.dest).map(_.toString), Map[String, String](), T.dest)
+      os.call(Seq("cmake", "-G", "Ninja", "-S", cmakefileLists().path, "-B", T.dest.toString).map(_.toString), Map[String, String](), T.dest)
+      os.call(Seq("ninja", "-C", T.dest).map(_.toString), Map[String, String](), T.dest)
       PathRef(T.dest / "emulator")
     }
   }
@@ -569,8 +570,8 @@ trait ArchTest extends Cross.Module4[String, String, String, String] {
   }
 
   def copy = T {
-    os.copy.over(os.pwd / "scripts" / "arch-test" / "spike", home().path / "spike")
-    os.copy.over(os.pwd / "scripts" / "arch-test" / "emulator", home().path / "emulator")
+    os.copy.over(pwd / "scripts" / "arch-test" / "spike", home().path / "spike")
+    os.copy.over(pwd / "scripts" / "arch-test" / "emulator", home().path / "emulator")
   }
 
   def run = T {
