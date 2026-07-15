@@ -9,6 +9,7 @@ import freechips.rocketchip.util.HeterogeneousBag
 
 import scala.collection.immutable
 import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.ArrayBuffer
 
 /** A field available in [[Parameters]] used to determine whether [[InwardNodeImp.monitor]] will be called. */
 case object MonitorsEnabled extends Field[Boolean](true)
@@ -187,11 +188,19 @@ abstract class SimpleNodeImp[D, U, E, B <: Data]
   def bundleI(e: E): B = bundle(e)
 }
 
+
+object BaseNodeGlobalView {
+  val nodes = ArrayBuffer[BaseNode]()
+}
+
 /** [[BaseNode]] is the abstract base class of the type hierarchy of diplomacy node classes.
   *
   * @param valName [[ValName]] of this node, used by naming inference.
   */
 abstract class BaseNode(implicit val valName: ValName) {
+
+  BaseNodeGlobalView.nodes.addOne(this)
+
   /** All subclasses of [[BaseNode]]s are expected to be instantiated only within [[LazyModule]]s.
     *
     * Sometimes one wants to view the entire diplomacy graph in a way
