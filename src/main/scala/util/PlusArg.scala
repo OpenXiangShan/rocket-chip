@@ -43,9 +43,9 @@ object Doctypes {
 }
 
 class plusarg_reader(val format: String, val default: BigInt, val docstring: String, val width: Int) extends BlackBox(Map(
-    "FORMAT"  -> StringParam(format),
-    "DEFAULT" -> IntParam(default),
-    "WIDTH" -> IntParam(width)
+    "FORMAT"  -> chisel3.experimental.StringParam(format),
+    "DEFAULT" -> chisel3.experimental.IntParam(default),
+    "WIDTH" -> chisel3.experimental.IntParam(width)
   )) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val out = Output(UInt(width.W))
