@@ -363,15 +363,32 @@ class SeqPLRU(n_sets: Int, n_ways: Int) extends SeqReplacementPolicy {
 }
 
 
-class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocReplacementPolicy {
+class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String, seedBySet: Boolean = false) extends SetAssocReplacementPolicy {
   val logic = policy.toLowerCase match {
     case "plru"  => new PseudoLRU(n_ways)
     case "lru"   => new TrueLRU(n_ways)
     case t => throw new IllegalArgumentException(s"unknown Replacement Policy type $t")
   }
+
+  private def seedState(set: Int): UInt = {
+    if (seedBySet && policy.toLowerCase == "plru" && n_ways == 4) {
+      // 4-way tree PLRU: bit2 = ways 3+2 older than 1+0; bit1 = way3 older than way2;
+      // bit0 = way1 older than way0 (bit=1 means left child is older). Pick initial
+      // state so that the first replacement way after reset rotates with set(1,0): 0,1,2,3.
+      (set & 0x3) match {
+        case 0 => 0.U(logic.nBits.W) // 000 -> way0
+        case 1 => 1.U(logic.nBits.W) // 001 -> way1
+        case 2 => 4.U(logic.nBits.W) // 100 -> way2
+        case _ => 6.U(logic.nBits.W) // 110 -> way3
+      }
+    } else {
+      0.U(logic.nBits.W)
+    }
+  }
+
   val state_vec =
     if (logic.nBits == 0) Reg(Vec(n_sets, UInt(logic.nBits.W))) // Work around elaboration error on following line
-    else RegInit(VecInit(Seq.fill(n_sets)(0.U(logic.nBits.W))))
+    else RegInit(VecInit(Seq.tabulate(n_sets)(seedState)))
 
   def access(set: UInt, touch_way: UInt) = {
     state_vec(set) := logic.get_next_state(state_vec(set), touch_way)
