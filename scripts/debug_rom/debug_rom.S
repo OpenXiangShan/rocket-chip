@@ -18,6 +18,19 @@
         .global entry
         .global exception
 
+// This macro handles mem access with proper management of the MPRVEN
+// Usage: MEMORY_ACCESS_WITH_MPRV(<your code>)
+#define MEMORY_ACCESS_WITH_MPRV(...)       \
+       csrrci s0, CSR_DCSR, DCSR_MPRVEN;   \
+       andi   s0, s0, DCSR_MPRVEN;         \
+       bnez   s0, 1f;                      \
+       __VA_ARGS__;                        \
+       j      2f;                          \
+1:                                         \
+       __VA_ARGS__;                        \
+       csrrsi zero, CSR_DCSR, DCSR_MPRVEN; \
+2:
+
         // Entry location on ebreak, Halt, or Breakpoint
         // It is the same for all harts. They branch when 
         // their GO or RESUME bit is set.
@@ -40,29 +53,38 @@ _entry:
         // We keep checking both whether there is something the debugger wants
         // us to do, or whether we should resume.
 entry_loop:
-        csrr s0, CSR_MHARTID
-        sw   s0, HALTED(zero)
-        lbu  s0, FLAGS(s0) // 1 byte flag per hart. Only one hart advances here.
+        MEMORY_ACCESS_WITH_MPRV(
+                csrr s0, CSR_MHARTID;
+                sw   s0, HALTED(zero);
+                lbu  s0, FLAGS(s0); // 1 byte flag per hart. Only one hart advances here.
+        )
         andi s0, s0, (1 << FLAG_GO) | (1 << FLAG_RESUME)
         beqz s0, entry_loop            // Loop until either GO or RESUME is set.
 
         andi s0, s0, (1 << FLAG_GO)
         beqz s0, _resume               // If GO is clear at this point, RESUME must be set.
 
-        csrr s0, CSR_DSCRATCH0         // Restore s0 here
-        sw zero, GOING(zero)           // When debug module sees this write, the GO flag is reset.
+        MEMORY_ACCESS_WITH_MPRV(
+                csrr s0, CSR_DSCRATCH0;         // Restore s0 here
+                sw zero, GOING(zero);           // When debug module sees this write, the GO flag is reset. 
+        )
         jalr zero, zero, %lo(whereto)          // Rocket-Chip has a specific hack which is that jalr in
                                        // Debug Mode will flush the I-Cache. We need that so that the
                                        // remainder of the variable instructions will be what Debug Module
                                        // intends.
 _resume:
-        csrr s0, CSR_MHARTID
-        sw   s0, RESUMING(zero) // When Debug Module sees this write, the RESUME flag is reset.
+        MEMORY_ACCESS_WITH_MPRV(
+                csrr s0, CSR_MHARTID;
+                sw   s0, RESUMING(zero); // When Debug Module sees this write, the RESUME flag is reset.
+        )
         csrr s0, CSR_DSCRATCH0  // Restore s0
         dret
 
 _exception:
-        sw      zero, EXCEPTION(zero) // Let debug module know you got an exception.
+        MEMORY_ACCESS_WITH_MPRV(
+                csrr s0, CSR_DSCRATCH0;
+                sw zero, EXCEPTION(zero); // Let debug module know you got an exception.
+        )
         ebreak
 
         // END OF ACTUAL "ROM" CONTENTS. BELOW IS JUST FOR LINKER SCRIPT.
