@@ -23,7 +23,14 @@ class ExpandedInstruction extends Bundle {
 
   fsIsOff indicates whether f/d-extention is enabled by CSR, `mstatus.fs === 0.U` for example
 */
-class RVCDecoder(x: UInt, fsIsOff: Bool, xLen: Int, fLen: Int, useAddiForMv: Boolean = false) {
+class RVCDecoder(
+  x: UInt,
+  fsIsOff: Bool,
+  xLen: Int,
+  fLen: Int,
+  useAddiForMv: Boolean = false,
+  hasZicfiss: Boolean = false
+) {
   def inst(bits: UInt, rd: UInt = x(11,7), rs1: UInt = x(19,15), rs2: UInt = x(24,20), rs3: UInt = x(31,27)) = {
     val res = Wire(new ExpandedInstruction)
     res.bits := bits
@@ -115,7 +122,20 @@ class RVCDecoder(x: UInt, fsIsOff: Bool, xLen: Int, fLen: Int, useAddiForMv: Boo
       val me = inst(Cat(luiImm(31,12), rd, opc), rd, rd, rs2p)
       val zcmop = x(7) && x(6,2) === 0.U && x(12,11) === 0.U
       val nop = inst(Cat(0.U(12.W), 0.U(5.W), 0.U(3.W), 0.U(5.W), 0x13.U(7.W)), 0.U, 0.U, 0.U, 0.U)
-      Mux(zcmop, nop, Mux(rd === sp, addi16sp, me))
+      val sspush = inst(
+        Cat("b1100111".U(7.W), ra, x0, "b100".U(3.W), x0, "b1110011".U(7.W)),
+        x0, x0, ra, x0
+      )
+      val sspopchk = inst(
+        Cat("b110011011100".U(12.W), 5.U(5.W), "b100".U(3.W), x0, "b1110011".U(7.W)),
+        x0, 5.U(5.W), x0, x0
+      )
+      val zcmopInst = if (hasZicfiss) {
+        Mux(rd === ra, sspush, Mux(rd === 5.U, sspopchk, nop))
+      } else {
+        nop
+      }
+      Mux(zcmop, zcmopInst, Mux(rd === sp, addi16sp, me))
     }
     def j = inst(Cat(jImm(20), jImm(10,1), jImm(11), jImm(19,12), x0, 0x6F.U(7.W)), x0, rs1p, rs2p)
     def beqz = inst(Cat(bImm(12), bImm(10,5), x0, rs1p, 0.U(3.W), bImm(4,1), bImm(11), 0x63.U(7.W)), rs1p, rs1p, x0)
