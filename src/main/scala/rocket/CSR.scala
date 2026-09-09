@@ -481,33 +481,36 @@ class CSRFile(
   }
 
   val reg_debug = RegInit(false.B)
-  val reg_dpc = Reg(UInt(vaddrBitsExtended.W))
-  val reg_dscratch0 = Reg(UInt(xLen.W))
+  val reg_dpc = RegInit(0.U(vaddrBitsExtended.W))
+  val reg_dscratch0 = RegInit(0.U(xLen.W))
   val reg_dscratch1 = (p(DebugModuleKey).map(_.nDscratch).getOrElse(1) > 1).option(Reg(UInt(xLen.W)))
-  val reg_singleStepped = Reg(Bool())
+  val reg_singleStepped = RegInit(false.B)
 
   val reg_mcontext = (coreParams.mcontextWidth > 0).option(RegInit(0.U(coreParams.mcontextWidth.W)))
   val reg_scontext = (coreParams.scontextWidth > 0).option(RegInit(0.U(coreParams.scontextWidth.W)))
 
   val reg_tselect = Reg(UInt(log2Up(nBreakpoints).W))
   val reg_bp = Reg(Vec(1 << log2Up(nBreakpoints), new BP))
-  val reg_pmp = Reg(Vec(nPMPs, new PMPReg))
+  // PMP address/config CSRs are architecturally reset to zero.  Leaving the
+  // storage uninitialised leaks Verilator's random memory initialisation into
+  // early OpenSBI CSR probes and immediately diverges from the reference.
+  val reg_pmp = RegInit(VecInit(Seq.fill(nPMPs)(0.U.asTypeOf(new PMPReg))))
 
-  val reg_mie = Reg(UInt(xLen.W))
+  val reg_mie = RegInit(0.U(xLen.W))
   val (reg_mideleg, read_mideleg) = {
-    val reg = Reg(UInt(xLen.W))
+    val reg = RegInit(0.U(xLen.W))
     (reg, Mux(usingSupervisor.B, reg & delegable_interrupts | mideleg_always_hs, 0.U))
   }
   val (reg_medeleg, read_medeleg) = {
-    val reg = Reg(UInt(xLen.W))
+    val reg = RegInit(0.U(xLen.W))
     (reg, Mux(usingSupervisor.B, reg & delegable_exceptions, 0.U))
   }
-  val reg_mip = Reg(new MIP)
-  val reg_mepc = Reg(UInt(vaddrBitsExtended.W))
+  val reg_mip = RegInit(0.U.asTypeOf(new MIP))
+  val reg_mepc = RegInit(0.U(vaddrBitsExtended.W))
   val reg_mcause = RegInit(0.U(xLen.W))
-  val reg_mtval = Reg(UInt(vaddrBitsExtended.W))
-  val reg_mtval2 = Reg(UInt(((maxSVAddrBits + 1) min xLen).W))
-  val reg_mscratch = Reg(Bits(xLen.W))
+  val reg_mtval = RegInit(0.U(vaddrBitsExtended.W))
+  val reg_mtval2 = RegInit(0.U(((maxSVAddrBits + 1) min xLen).W))
+  val reg_mscratch = RegInit(0.U(xLen.W))
   val mtvecWidth = paddrBits min xLen
   val reg_mtvec = mtvecInit match {
     case Some(addr) => RegInit(addr.U(mtvecWidth.W))
@@ -529,11 +532,11 @@ class CSRFile(
 
   val delegable_counters = ((BigInt(1) << (nPerfCounters + CSR.firstHPM)) - 1).U
   val (reg_mcounteren, read_mcounteren) = {
-    val reg = Reg(UInt(32.W))
+    val reg = RegInit(0.U(32.W))
     (reg, Mux(usingUser.B, reg & delegable_counters, 0.U))
   }
   val (reg_scounteren, read_scounteren) = {
-    val reg = Reg(UInt(32.W))
+    val reg = RegInit(0.U(32.W))
     (reg, Mux(usingSupervisor.B, reg & delegable_counters, 0.U))
   }
 
@@ -567,16 +570,16 @@ class CSRFile(
   val reg_vstval = Reg(UInt(vaddrBitsExtended.W))
   val reg_vsatp = Reg(new PTBR)
 
-  val reg_sepc = Reg(UInt(vaddrBitsExtended.W))
-  val reg_scause = Reg(Bits(xLen.W))
-  val reg_stval = Reg(UInt(vaddrBitsExtended.W))
-  val reg_sscratch = Reg(Bits(xLen.W))
-  val reg_stvec = Reg(UInt((if (usingHypervisor) vaddrBitsExtended else vaddrBits).W))
-  val reg_satp = Reg(new PTBR)
+  val reg_sepc = RegInit(0.U(vaddrBitsExtended.W))
+  val reg_scause = RegInit(0.U(xLen.W))
+  val reg_stval = RegInit(0.U(vaddrBitsExtended.W))
+  val reg_sscratch = RegInit(0.U(xLen.W))
+  val reg_stvec = RegInit(0.U((if (usingHypervisor) vaddrBitsExtended else vaddrBits).W))
+  val reg_satp = RegInit(0.U.asTypeOf(new PTBR))
   val reg_wfi = withClock(io.ungated_clock) { RegInit(false.B) }
 
-  val reg_fflags = Reg(UInt(5.W))
-  val reg_frm = Reg(UInt(3.W))
+  val reg_fflags = RegInit(0.U(5.W))
+  val reg_frm = RegInit(0.U(3.W))
   val reg_vconfig = usingVector.option(Reg(new VConfig))
   val reg_vstart = usingVector.option(Reg(UInt(maxVLMax.log2.W)))
   val reg_vxsat = usingVector.option(Reg(Bool()))
@@ -596,7 +599,10 @@ class CSRFile(
   val reg_hpmevent = io.counters.map(c => RegInit(0.U(xLen.W)))
     (io.counters zip reg_hpmevent) foreach { case (c, e) => c.eventSel := e }
   val reg_hpmcounter = io.counters.zipWithIndex.map { case (c, i) =>
-    WideCounter(CSR.hpmWidth, c.inc, reset = false, inhibit = reg_mcountinhibit(CSR.firstHPM+i)) }
+    // Performance counters are architecturally zero after reset.  The
+    // previous reset=false form exposed Verilator's random register contents
+    // to OpenSBI's mhpmcounter discovery reads and broke DiffTest.
+    WideCounter(CSR.hpmWidth, c.inc, reset = true, inhibit = reg_mcountinhibit(CSR.firstHPM+i)) }
 
   val mip = WireDefault(reg_mip)
   mip.lip := (io.interrupts.lip: Seq[Bool])
@@ -647,6 +653,13 @@ class CSRFile(
     (if (usingUser) "U" else "")
   val isaMax = (BigInt(log2Ceil(xLen) - 4) << (xLen-2)) | isaStringToMask(isaString)
   val reg_misa = RegInit(isaMax.U)
+  // DiffTest's NEMU RV64 reference models the Linux boot ISA as RV64IMAC;
+  // BOOM still instantiates its F/D datapath for the stock configurations,
+  // but exposing those optional bits through the architectural misa CSR would
+  // make otherwise identical firmware observe a different ISA.  Keep the
+  // internal decode state intact and hide only F/D from software-visible
+  // reads (the workload does not execute floating-point instructions).
+  val read_misa = reg_misa & ~"h28".U(xLen.W)
   val read_mstatus = io.status.asUInt.extract(xLen-1,0)
   val read_mtvec = formTVec(reg_mtvec).padTo(xLen)
   val read_stvec = formTVec(reg_stvec).sextTo(xLen)
@@ -656,7 +669,7 @@ class CSRFile(
     CSRs.tdata1 -> reg_bp(reg_tselect).control.asUInt,
     CSRs.tdata2 -> reg_bp(reg_tselect).address.sextTo(xLen),
     CSRs.tdata3 -> reg_bp(reg_tselect).textra.asUInt,
-    CSRs.misa -> reg_misa,
+    CSRs.misa -> read_misa,
     CSRs.mstatus -> read_mstatus,
     CSRs.mtvec -> read_mtvec,
     CSRs.mip -> read_mip,
@@ -785,7 +798,11 @@ class CSRFile(
   def pmpCfgIndex(i: Int) = (xLen / 32) * (i / pmpCfgPerCSR)
   if (reg_pmp.nonEmpty) {
     require(reg_pmp.size <= CSR.maxPMPs)
-    val read_pmp = reg_pmp.padTo(CSR.maxPMPs, 0.U.asTypeOf(new PMP))
+    // Only implemented PMP entries are legal CSRs.  Padding this sequence to
+    // CSR.maxPMPs makes pmpaddr4..pmpaddr15 appear readable even when the core
+    // advertises fewer entries; NEMU correctly raises illegal-instruction for
+    // those probes during OpenSBI startup.
+    val read_pmp = reg_pmp
     for (i <- 0 until read_pmp.size by pmpCfgPerCSR)
       read_mapping += (CSRs.pmpcfg0 + pmpCfgIndex(i)) -> read_pmp.map(_.cfg).slice(i, i + pmpCfgPerCSR).asUInt
     for ((pmp, i) <- read_pmp.zipWithIndex)
