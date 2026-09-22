@@ -1,6 +1,10 @@
 FUZZ_TOP  = freechips.rocketchip.system.FuzzMain
 BUILD_DIR = $(abspath ./build)
 
+SPIKE_HOME ?= $(abspath ../riscv-isa-sim)
+NEMU_HOME  ?= $(abspath ../NEMU)
+export SPIKE_HOME NEMU_HOME
+
 RTL_DIR    = $(BUILD_DIR)/rtl
 RTL_SUFFIX = sv
 TOP_V      = $(RTL_DIR)/SimTop.$(RTL_SUFFIX)
