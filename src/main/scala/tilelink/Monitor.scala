@@ -64,10 +64,25 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
       c.visibility.map(_.contains(address)).reduce(_ || _)
     }.reduce(_ && _)
 
+  // Kunminghu's existing four-bit extension is deliberately sparse. Keep
+  // reserved opcodes illegal rather than accepting every opcode with bit 3 set.
+  def isCBO(opcode: UInt): Bool = opcode === TLMessages.CBOClean ||
+    opcode === TLMessages.CBOFlush || opcode === TLMessages.CBOInval
+
+  // A CMO names a cache block. The scalar-command encoding uses size=0;
+  // CacheBlockOperation also accepts the explicit block size. XSCache returns
+  // the block size on CBOAck in either case (GrantBuffer.toTLBundleD).
+  def cboResponseSize(address: UInt, edge: TLEdge): UInt = {
+    val managers = edge.manager.managers.filterNot(_.supportsAcquireB.none)
+    if (managers.isEmpty) 0.U else Mux1H(managers.map { m =>
+      m.address.map(_.contains(address)).reduce(_ || _) -> log2Ceil(m.supportsAcquireB.max).U
+    })
+  }
+
   def legalizeFormatA(bundle: TLBundleA, edge: TLEdge): Unit = {
     //switch this flag to turn on diplomacy in error messages
     def diplomacyInfo = if (true) "" else "\nThe diplomacy information for the edge is as follows:\n" + edge.formatEdge + "\n"
-    monAssert (TLMessages.isA(bundle.opcode), "'A' channel has invalid opcode" + extra)
+    monAssert (TLMessages.isA(bundle.opcode) || isCBO(bundle.opcode), "'A' channel has invalid opcode" + extra)
 
     // Reuse these subexpressions to save some firrtl lines
     val source_ok = edge.client.contains(bundle.source)
@@ -75,6 +90,16 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
     val mask = edge.full_mask(bundle)
 
     monAssert (visible(edge.address(bundle), bundle.source, edge), "'A' channel carries an address illegal for the specified bank visibility")
+
+    when (isCBO(bundle.opcode)) {
+      val blockSize = cboResponseSize(edge.address(bundle), edge)
+      monAssert (source_ok, "'A' channel CBO carries invalid source ID" + extra)
+      monAssert (edge.manager.supportsAcquireBSafe(edge.address(bundle), blockSize), "'A' channel CBO carries unmanaged cache-block address" + extra)
+      monAssert (bundle.size === 0.U || bundle.size === blockSize, "'A' channel CBO carries invalid block size" + extra)
+      monAssert (edge.isAligned(bundle.address, blockSize), "'A' channel CBO address not block aligned" + extra)
+      monAssert (!bundle.corrupt, "'A' channel CBO is corrupt" + extra)
+      // CMO param/mask/data are unspecified by CacheBlockOperation.
+    }
 
     //The monitor doesn’t check for acquire T vs acquire B, it assumes that acquire B implies acquire T and only checks for acquire B
     //TODO: check for acquireT?
@@ -300,12 +325,20 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
   }
 
   def legalizeFormatD(bundle: TLBundleD, edge: TLEdge): Unit = {
-    assume (TLMessages.isD(bundle.opcode), "'D' channel has invalid opcode" + extra)
+    assume ((TLMessages.isD(bundle.opcode) && bundle.opcode =/= 3.U) || bundle.opcode === TLMessages.CBOAck, "'D' channel has invalid opcode" + extra)
 
     val source_ok = edge.client.contains(bundle.source)
     val sink_ok = bundle.sink < edge.manager.endSinkId.U
     val deny_put_ok = edge.manager.mayDenyPut.B
     val deny_get_ok = edge.manager.mayDenyGet.B
+
+    when (bundle.opcode === TLMessages.CBOAck) {
+      assume (source_ok, "'D' channel CBOAck carries invalid source ID" + extra)
+      assume (!bundle.corrupt, "'D' channel CBOAck is corrupt" + extra)
+      assume (deny_put_ok || !bundle.denied, "'D' channel CBOAck is denied" + extra)
+      // CBOAck has no permission transfer or sink allocation. Its param is
+      // unspecified; source, response opcode and block size are checked below.
+    }
 
     when (bundle.opcode === TLMessages.ReleaseAck) {
       assume (source_ok, "'D' channel ReleaseAck carries invalid source ID" + extra)
@@ -603,7 +636,7 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
 
   def legalizeADSource(bundle: TLBundle, edge: TLEdge): Unit = {
     val a_size_bus_size       = edge.bundle.sizeBits + 1 //add one so that 0 is not mapped to anything (size 0 -> size 1 in map, size 0 in map means unset)
-    val a_opcode_bus_size     = 3 + 1 //opcode size is 3, but add so that 0 is not mapped to anything
+    val a_opcode_bus_size     = bundle.a.bits.opcode.getWidth + 1 // validity bit plus the complete extended opcode
     val log_a_opcode_bus_size = log2Ceil(a_opcode_bus_size)
     val log_a_size_bus_size   = log2Ceil(a_size_bus_size)
     def size_to_numfullbits(x: UInt): UInt = (1.U << x) - 1.U //convert a number to that many full bits
@@ -629,7 +662,7 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
     val a_sizes_set = WireInit(0.U((edge.client.endSourceId << log_a_size_bus_size).W))
     a_sizes_set.suggestName("a_sizes_set")
 
-    val a_opcode_lookup = WireInit(0.U((1 << log_a_opcode_bus_size).W))
+    val a_opcode_lookup = WireInit(0.U(bundle.a.bits.opcode.getWidth.W))
     a_opcode_lookup.suggestName("a_opcode_lookup")
     a_opcode_lookup := ((inflight_opcodes) >> (bundle.d.bits.source << log_a_opcode_bus_size.U) & size_to_numfullbits(1.U << log_a_opcode_bus_size.U)) >> 1.U
 
@@ -637,8 +670,11 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
     a_size_lookup.suggestName("a_size_lookup")
     a_size_lookup := ((inflight_sizes) >> (bundle.d.bits.source << log_a_size_bus_size.U) & size_to_numfullbits(1.U << log_a_size_bus_size.U)) >> 1.U
 
-    val responseMap             = VecInit(Seq(TLMessages.AccessAck, TLMessages.AccessAck, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.HintAck, TLMessages.Grant,     TLMessages.Grant))
-    val responseMapSecondOption = VecInit(Seq(TLMessages.AccessAck, TLMessages.AccessAck, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.HintAck, TLMessages.GrantData, TLMessages.Grant))
+    val reservedResponses = Seq.fill(4)(TLMessages.AccessAck)
+    val cboResponses = Seq.fill(3)(TLMessages.CBOAck)
+    val responseMap             = VecInit(Seq(TLMessages.AccessAck, TLMessages.AccessAck, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.HintAck, TLMessages.Grant,     TLMessages.Grant) ++ reservedResponses ++ cboResponses :+ TLMessages.AccessAck)
+    val responseMapSecondOption = VecInit(Seq(TLMessages.AccessAck, TLMessages.AccessAck, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.AccessAckData, TLMessages.HintAck, TLMessages.GrantData, TLMessages.Grant) ++ reservedResponses ++ cboResponses :+ TLMessages.AccessAck)
+    val a_response_size = Mux(isCBO(bundle.a.bits.opcode), cboResponseSize(bundle.a.bits.address, edge), bundle.a.bits.size)
 
     val a_opcodes_set_interm = WireInit(0.U(a_opcode_bus_size.W))
     a_opcodes_set_interm.suggestName("a_opcodes_set_interm")
@@ -652,7 +688,7 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
     when (bundle.a.fire && a_first && edge.isRequest(bundle.a.bits)) {
       a_set                := UIntToOH(bundle.a.bits.source)
       a_opcodes_set_interm := (bundle.a.bits.opcode << 1.U) | 1.U
-      a_sizes_set_interm   := (bundle.a.bits.size << 1.U) | 1.U
+      a_sizes_set_interm   := (a_response_size << 1.U) | 1.U
       a_opcodes_set        := (a_opcodes_set_interm) << (bundle.a.bits.source << log_a_opcode_bus_size.U)
       a_sizes_set          := (a_sizes_set_interm) << (bundle.a.bits.source << log_a_size_bus_size.U)
       monAssert(!inflight(bundle.a.bits.source), "'A' channel re-used a source ID" + extra)
@@ -684,7 +720,7 @@ class TLMonitor(args: TLMonitorArgs, monitorDir: MonitorDirection = MonitorDirec
       when (same_cycle_resp) {
         assume((bundle.d.bits.opcode === responseMap(bundle.a.bits.opcode)) ||
                 (bundle.d.bits.opcode === responseMapSecondOption(bundle.a.bits.opcode)), "'D' channel contains improper opcode response" + extra)
-        assume((bundle.a.bits.size === bundle.d.bits.size), "'D' channel contains improper response size" + extra)
+        assume((a_response_size === bundle.d.bits.size), "'D' channel contains improper response size" + extra)
       } .otherwise {
         assume((bundle.d.bits.opcode === responseMap(a_opcode_lookup)) ||
                (bundle.d.bits.opcode === responseMapSecondOption(a_opcode_lookup)), "'D' channel contains improper opcode response" + extra)
