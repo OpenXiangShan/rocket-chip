@@ -491,9 +491,8 @@ class CSRFile(
 
   val reg_tselect = Reg(UInt(log2Up(nBreakpoints).W))
   val reg_bp = Reg(Vec(1 << log2Up(nBreakpoints), new BP))
-  // PMP address/config CSRs are architecturally reset to zero.  Leaving the
-  // storage uninitialised leaks Verilator's random memory initialisation into
-  // early OpenSBI CSR probes and immediately diverges from the reference.
+  // Start PMP state at zero to match the reference before firmware configures
+  // protection, rather than exposing simulator-dependent initial values.
   val reg_pmp = RegInit(VecInit(Seq.fill(nPMPs)(0.U.asTypeOf(new PMPReg))))
 
   val reg_mie = RegInit(0.U(xLen.W))
@@ -599,9 +598,7 @@ class CSRFile(
   val reg_hpmevent = io.counters.map(c => RegInit(0.U(xLen.W)))
     (io.counters zip reg_hpmevent) foreach { case (c, e) => c.eventSel := e }
   val reg_hpmcounter = io.counters.zipWithIndex.map { case (c, i) =>
-    // Performance counters are architecturally zero after reset.  The
-    // previous reset=false form exposed Verilator's random register contents
-    // to OpenSBI's mhpmcounter discovery reads and broke DiffTest.
+    // Use deterministic initial values for firmware's counter discovery reads.
     WideCounter(CSR.hpmWidth, c.inc, reset = true, inhibit = reg_mcountinhibit(CSR.firstHPM+i)) }
 
   val mip = WireDefault(reg_mip)
@@ -641,6 +638,7 @@ class CSRFile(
   val isaMaskString =
     (if (usingMulDiv) "M" else "") +
     (if (usingAtomics) "A" else "") +
+    (if (coreParams.useZba && coreParams.useZbb && coreParams.useZbs) "B" else "") +
     (if (fLen >= 32) "F" else "") +
     (if (fLen >= 64) "D" else "") +
     (if (coreParams.hasV) "V" else "") +
@@ -653,13 +651,6 @@ class CSRFile(
     (if (usingUser) "U" else "")
   val isaMax = (BigInt(log2Ceil(xLen) - 4) << (xLen-2)) | isaStringToMask(isaString)
   val reg_misa = RegInit(isaMax.U)
-  // DiffTest's NEMU RV64 reference models the Linux boot ISA as RV64IMAC;
-  // BOOM still instantiates its F/D datapath for the stock configurations,
-  // but exposing those optional bits through the architectural misa CSR would
-  // make otherwise identical firmware observe a different ISA.  Keep the
-  // internal decode state intact and hide only F/D from software-visible
-  // reads (the workload does not execute floating-point instructions).
-  val read_misa = reg_misa & ~"h28".U(xLen.W)
   val read_mstatus = io.status.asUInt.extract(xLen-1,0)
   val read_mtvec = formTVec(reg_mtvec).padTo(xLen)
   val read_stvec = formTVec(reg_stvec).sextTo(xLen)
@@ -669,7 +660,7 @@ class CSRFile(
     CSRs.tdata1 -> reg_bp(reg_tselect).control.asUInt,
     CSRs.tdata2 -> reg_bp(reg_tselect).address.sextTo(xLen),
     CSRs.tdata3 -> reg_bp(reg_tselect).textra.asUInt,
-    CSRs.misa -> read_misa,
+    CSRs.misa -> reg_misa,
     CSRs.mstatus -> read_mstatus,
     CSRs.mtvec -> read_mtvec,
     CSRs.mip -> read_mip,
@@ -798,11 +789,8 @@ class CSRFile(
   def pmpCfgIndex(i: Int) = (xLen / 32) * (i / pmpCfgPerCSR)
   if (reg_pmp.nonEmpty) {
     require(reg_pmp.size <= CSR.maxPMPs)
-    // Only implemented PMP entries are legal CSRs.  Padding this sequence to
-    // CSR.maxPMPs makes pmpaddr4..pmpaddr15 appear readable even when the core
-    // advertises fewer entries; NEMU correctly raises illegal-instruction for
-    // those probes during OpenSBI startup.
-    val read_pmp = reg_pmp
+    // Inactive PMP CSR slots remain read-only zero; only reg_pmp holds state.
+    val read_pmp = reg_pmp.padTo(CSR.maxPMPs, 0.U.asTypeOf(new PMP))
     for (i <- 0 until read_pmp.size by pmpCfgPerCSR)
       read_mapping += (CSRs.pmpcfg0 + pmpCfgIndex(i)) -> read_pmp.map(_.cfg).slice(i, i + pmpCfgPerCSR).asUInt
     for ((pmp, i) <- read_pmp.zipWithIndex)
