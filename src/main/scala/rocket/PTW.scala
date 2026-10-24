@@ -25,6 +25,8 @@ class PTWReq(implicit p: Parameters) extends CoreBundle()(p) {
   val need_gpa = Bool()
   val vstage1 = Bool()
   val stage2 = Bool()
+  /** ASID of the satp/vsatp in effect when the walk was accepted. */
+  val asid = UInt((asIdBits max 1).W)
 }
 
 /** PTE info from L2TLB to TLB
@@ -166,6 +168,7 @@ class L2TLBEntry(nSets: Int)(implicit p: Parameters) extends CoreBundle()(p)
   val idxBits = log2Ceil(nSets)
   val tagBits = maxSVAddrBits - pgIdxBits - idxBits + (if (usingHypervisor) 1 else 0)
   val tag = UInt(tagBits.W)
+  val asid = UInt((asIdBits max 1).W)
   val ppn = UInt(ppnBits.W)
   /** dirty bit */
   val d = Bool()
@@ -440,6 +443,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       entry.w := r_pte.w
       entry.r := r_pte.r
       entry.tag := r_tag
+      entry.asid := r_req.asid
       // if all the way are valid, use plru to select one way to be replaced,
       // otherwise use PriorityEncoderOH to select one
       val wmask = if (coreParams.nL2TLBWays > 1) Mux(r_valid_vec_q.andR, UIntToOH(r_l2_plru_way, coreParams.nL2TLBWays), PriorityEncoderOH(~r_valid_vec_q)) else 1.U(1.W)
@@ -477,7 +481,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     when (s2_valid && s2_error) { valid.foreach { _ := 0.U }}
     // decode
     val s2_entry_vec = s2_rdata.map(_.uncorrected.asTypeOf(new L2TLBEntry(nL2TLBSets)))
-    val s2_hit_vec = (0 until coreParams.nL2TLBWays).map(way => s2_valid_vec(way) && (r_tag === s2_entry_vec(way).tag))
+    val s2_hit_vec = (0 until coreParams.nL2TLBWays).map(way => s2_valid_vec(way) &&
+      (r_tag === s2_entry_vec(way).tag) &&
+      (s2_g_vec(way) || (asIdBits == 0).B || s2_entry_vec(way).asid === r_req.asid))
     val s2_hit = s2_valid && s2_hit_vec.orR
     io.dpath.perf.l2miss := s2_valid && !(s2_hit_vec.orR)
     io.dpath.perf.l2hit := s2_hit
