@@ -104,6 +104,8 @@ class TLBEntryData(implicit p: Parameters) extends CoreBundle()(p) {
   val u = Bool()
   /** pte.g global */
   val g = Bool()
+  /** satp.ASID for this sector. Ignored when g=1. */
+  val asid = UInt((asIdBits max 1).W)
   /** access exception.
     * D$ -> PTW -> TLB AE
     * Alignment failed.
@@ -173,7 +175,7 @@ class TLBEntry(val nSectors: Int, val superpage: Boolean, val superpageOnly: Boo
   /** returns whether tag matches vpn */
   def sectorTagMatch(vpn: UInt, virtual: Bool) = (((tag_vpn ^ vpn) >> nSectors.log2) === 0.U) && (tag_v === virtual)
   /** returns hit signal */
-  def hit(vpn: UInt, virtual: Bool): Bool = {
+  def vpnHit(vpn: UInt, virtual: Bool): Bool = {
     if (superpage && usingVM) {
       var tagMatch = valid.head && (tag_v === virtual)
       for (j <- 0 until pgLevels) {
@@ -188,6 +190,15 @@ class TLBEntry(val nSectors: Int, val superpage: Boolean, val superpageOnly: Boo
       valid(idx) && sectorTagMatch(vpn, virtual)
     }
   }
+  /** Global entries match every ASID. asIdBits==0 keeps the old always-hit behavior. */
+  def asidHit(vpn: UInt, asid: UInt): Bool = {
+    if (asIdBits == 0) true.B
+    else {
+      val d = getData(vpn)
+      d.g || d.asid === asid
+    }
+  }
+  def hit(vpn: UInt, virtual: Bool, asid: UInt): Bool = vpnHit(vpn, virtual) && asidHit(vpn, asid)
   /** returns the ppn of the input TLBEntryData */
   def ppn(vpn: UInt, data: TLBEntryData) = {
     val supervisorVPNBits = pgLevels * pgLevelBits
@@ -224,7 +235,7 @@ class TLBEntry(val nSectors: Int, val superpage: Boolean, val superpageOnly: Boo
   }
   def invalidateVPN(vpn: UInt, virtual: Bool): Unit = {
     if (superpage) {
-      when (hit(vpn, virtual)) { invalidate() }
+      when (vpnHit(vpn, virtual)) { invalidate() }
     } else {
       when (sectorTagMatch(vpn, virtual)) {
         for (((v, e), i) <- (valid zip entry_data).zipWithIndex)
@@ -352,6 +363,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val state = RegInit(s_ready)
   // use vpn as refill_tag
   val r_refill_tag = Reg(UInt(vpnBits.W))
+  val r_refill_asid = Reg(UInt((asIdBits max 1).W))
   val r_superpage_repl_addr = Reg(UInt(log2Ceil(superpage_entries.size).W))
   val r_sectored_repl_addr = Reg(UInt(log2Ceil(sectored_entries.head.size).W))
   val r_sectored_hit = Reg(Valid(UInt(log2Ceil(sectored_entries.head.size).W)))
@@ -436,8 +448,9 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
 
   // hit check
   val sector_hits = sectored_entries(memIdx).map(_.sectorHit(vpn, priv_v))
-  val superpage_hits = superpage_entries.map(_.hit(vpn, priv_v))
-  val hitsVec = all_entries.map(vm_enabled && _.hit(vpn, priv_v))
+  val lookup_asid = satp.asid((asIdBits max 1) - 1, 0)
+  val superpage_hits = superpage_entries.map(_.hit(vpn, priv_v, lookup_asid))
+  val hitsVec = all_entries.map(vm_enabled && _.hit(vpn, priv_v, lookup_asid))
   val real_hits = hitsVec.asUInt
   val hits = Cat(!vm_enabled, real_hits)
 
@@ -451,6 +464,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
     newEntry.c := cacheable
     newEntry.u := pte.u
     newEntry.g := pte.g && pte.v
+    newEntry.asid := r_refill_asid
     newEntry.ae_ptw := io.ptw.resp.bits.ae_ptw
     newEntry.ae_final := io.ptw.resp.bits.ae_final
     newEntry.ae_stage2 := io.ptw.resp.bits.ae_final && io.ptw.resp.bits.gpa_is_pte && r_stage2_en
@@ -665,11 +679,13 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   io.ptw.req.bits.bits.vstage1 := r_vstage1_en
   io.ptw.req.bits.bits.stage2 := r_stage2_en
   io.ptw.req.bits.bits.need_gpa := r_need_gpa
+  io.ptw.req.bits.bits.asid := lookup_asid
 
   if (usingVM) {
     when(io.ptw.req.fire && io.ptw.req.bits.valid) {
       r_gpa_valid := false.B
       r_gpa_vpn   := r_refill_tag
+      r_refill_asid := io.ptw.req.bits.bits.asid
     }
 
     val sfence = io.sfence.valid
