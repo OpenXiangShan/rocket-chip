@@ -7,10 +7,17 @@ import $file.cde.common
 import $file.common
 
 object v {
-  val scala = "2.13.17"
+  val scala = "2.13.18"
   // the first version in this Map is the mainly supported version which will be used to run tests
   val chiselCrossVersions = Map(
-    "7.13.0" -> (mvn"org.chipsalliance::chisel:7.13.0", mvn"org.chipsalliance:::chisel-plugin:7.13.0")
+    "xiangshan" -> (
+      mvn"cc.xiangshan::chisel:7.16.0-xiangshan-1",
+      mvn"cc.xiangshan:::chisel-plugin:7.16.0-xiangshan-1"
+    ),
+    "upstream" -> (
+      mvn"org.chipsalliance::chisel:7.16.0",
+      mvn"org.chipsalliance:::chisel-plugin:7.16.0"
+    )
   )
   val mainargs = mvn"com.lihaoyi::mainargs:0.5.0"
   val json4sJackson = mvn"org.json4s::json4s-jackson:4.0.5"
