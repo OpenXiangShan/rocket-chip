@@ -7,6 +7,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
+import scala.collection.mutable.ArrayBuffer
 
 // Trades off slave port proximity against routing resource cost
 object ForceFanout
@@ -75,8 +76,17 @@ class TLXbar(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parame
       println (s"!!! WARNING !!!")
     }
 
-    TLXbar.circuit(policy, node.in, node.out)
+    TLXbar.circuit(policy, node.in, node.out, Some(node))
   }
+}
+
+case class XbarView(self: BaseNode, inputSegs: Seq[BaseNode], outputSegs: Seq[BaseNode], routes: Seq[Seq[(BaseNode, AddressSet)]]) {
+  def inputTerminals = inputSegs.filter(n => !n.name.equals("xbar.node") && !n.isInstanceOf[TLNexusNode])
+  def outputTerminals = outputSegs.filter(n => !n.name.equals("xbar.node") && !n.isInstanceOf[TLNexusNode])
+}
+
+object XbarGlobalView {
+  val xbars = ArrayBuffer[XbarView]()
 }
 
 object TLXbar
@@ -109,9 +119,86 @@ object TLXbar
       }
     }
   }
-  def circuit(policy: TLArbiter.Policy, seqIn: Seq[(TLBundle, TLEdge)], seqOut: Seq[(TLBundle, TLEdge)]) {
+
+  def circuit(policy: TLArbiter.Policy, seqIn: Seq[(TLBundle, TLEdge)], seqOut: Seq[(TLBundle, TLEdge)], node: Option[BaseNode] = None) {
     val (io_in, edgesIn) = seqIn.unzip
     val (io_out, edgesOut) = seqOut.unzip
+
+    def space(depth: Int) = {
+      (0 until depth).foldLeft("")((s: String, i: Int) => { s ++ " " })
+    }
+
+    def dfsInput(node: BaseNode) {
+      if (node.name.equals("xbar.node"))
+        println(s"[Diplomacy-G] XBar of input direction reached: ${node.name} ${node.valName.name} ${node.hashCode()}\n${node.context}")
+      if (node.inputs.isEmpty)
+        println(s"[Diplomacy-G] Terminal of input direction reached: ${node.name} ${node.valName.name} ${node.hashCode()}\n${node.context}")
+      else
+        node.inputs.foreach(i => dfsInput(i._1))
+    }
+
+    def dfsOutput(node: BaseNode) {
+      if (node.name.equals("xbar.node"))
+        println(s"[Diplomacy-G] XBar of output direction reached: ${node.name} ${node.valName.name} ${node.hashCode()}\n${node.context}")
+      if (node.outputs.isEmpty)
+        println(s"[Diplomacy-G] Terminal of output direction reached: ${node.name} ${node.valName.name} ${node.hashCode()}\n${node.context}")
+      else
+        node.outputs.foreach(o => dfsOutput(o._1))
+    }
+
+    def dfsInputSeg(node: BaseNode, index: Int, depth: Int = 0, terminals: Seq[BaseNode] = Seq()) : Seq[BaseNode] = {
+      if (node.name.equals("xbar.node")) {
+        println(s"[Diplomacy-S] I ${space(depth)}-> X (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()}")
+        terminals :+ node
+      } else if (node.isInstanceOf[TLNexusNode]) {
+        println(s"[Diplomacy-S] I ${space(depth)}-> N (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()} (terminated at unknown nexus node)")
+        terminals :+ node
+      } else if (node.inputs.isEmpty) {
+        println(s"[Diplomacy-S] I ${space(depth)}-> T (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()}")
+        terminals :+ node
+      } else
+        node.inputs.map(o => dfsInputSeg(o._1, depth + 1)).foldLeft(Seq[BaseNode]())((a, b) => a :++ b)
+    }
+
+    def dfsOutputSeg(node: BaseNode, index: Int, depth: Int = 0, terminals: Seq[BaseNode] = Seq()) : Seq[BaseNode] = {
+      if (node.name.equals("xbar.node")) {
+        println(s"[Diplomacy-S] O ${space(depth)}-> X (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()}")
+        terminals :+ node
+      } else if (node.isInstanceOf[TLNexusNode]) {
+        println(s"[Diplomacy-S] O ${space(depth)}-> N (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()} (terminated at unknown nexus node)")
+        terminals :+ node
+      } else if (node.outputs.isEmpty) {
+        println(s"[Diplomacy-S] O ${space(depth)}-> T (${depth}) ${node.name} ${node.valName.name} ${node.hashCode()}")
+        terminals :+ node
+      } else
+        node.outputs.map(o => dfsOutputSeg(o._1, depth + 1)).foldLeft(Seq[BaseNode]())((a, b) => a :++ b)
+    }
+
+    var inputSegs = Seq[BaseNode]()
+    var outputSegs = Seq[BaseNode]()
+
+    if (node.isDefined) {
+      println(s"[Diplomacy] ========================")
+      println(s"[Diplomacy] XBar spawned: ${node.get.name} ${node.get.valName.name} ${node.get.hashCode()}\n${node.get.context}")
+    //println(s"[Diplomacy] ------------------------")
+    //node.get.inputs.foreach(i => dfsInput(i._1))
+    //println(s"[Diplomacy] ------------------------")
+    //node.get.outputs.foreach(o => dfsOutput(o._1))
+      println(s"[Diplomacy] ------------------------")
+      inputSegs = node.get.inputs.zipWithIndex.map { case (o, i) => dfsInputSeg(o._1, i) }.foldLeft(Seq[BaseNode]())((a, b) => a :++ b)
+      println(s"[Diplomacy] ------------------------")
+      outputSegs = node.get.outputs.zipWithIndex.map { case (o, i) => dfsOutputSeg(o._1, i) }.foldLeft(Seq[BaseNode]())((a, b) => a :++ b)
+      println(s"[Diplomacy] ------------------------")
+    }
+
+    println(s"[Diplomacy] Edges in: ${edgesIn.size}, input segment terminals: ${inputSegs.size}")
+    println(s"[Diplomacy] Input segment terminals: ${inputSegs.map(_.name)}")
+
+    println(s"[Diplomacy] Edges out: ${edgesOut.size}, output segment terminals: ${outputSegs.size}")
+    println(s"[Diplomacy] Output segment terminals: ${outputSegs.map(_.name)}")
+    println(s"[Diplomacy] ------------------------")
+
+    var outputSegsAddresses = Vector.fill(outputSegs.size)(ArrayBuffer[(BaseNode, AddressSet)]())
 
     // Not every master need connect to every slave on every channel; determine which connections are necessary
     val reachableIO = edgesIn.map { cp => edgesOut.map { mp =>
@@ -268,11 +355,19 @@ object TLXbar
     def filter[T](data: Seq[T], mask: Seq[Boolean]) = (data zip mask).filter(_._2).map(_._1)
 
     // Based on input=>output connectivity, create per-input minimal address decode circuits
+    // and collect all A input/output routes
+    println(s"[Diplomacy] connectAIO: ${connectAIO}")
+    println(s"[Diplomacy] ------------------------")
+
+    var outputPortAddresses = scala.collection.mutable.Map[Seq[Boolean], Seq[Seq[AddressSet]]]()
+
     val requiredAC = (connectAIO ++ connectCIO).distinct
-    val outputPortFns: Map[Vector[Boolean], Seq[UInt => Bool]] = requiredAC.map { connectO =>
+    val outputPortFns: Map[Vector[Boolean], Seq[UInt => Bool]] = requiredAC.zipWithIndex.map { case (connectO, in_index) =>
       val port_addrs = edgesOut.map(_.manager.managers.flatMap(_.address))
       val routingMask = AddressDecoder(filter(port_addrs, connectO))
       val route_addrs = port_addrs.map(seq => AddressSet.unify(seq.map(_.widen(~routingMask)).distinct))
+
+      outputPortAddresses += ((connectO, route_addrs))
 
       // Print the address mapping
       if (false) {
@@ -287,6 +382,25 @@ object TLXbar
 
       (connectO, route_addrs.map(seq => (addr: UInt) => seq.map(_.contains(addr)).reduce(_ || _)))
     }.toMap
+
+    connectAIO.zipWithIndex.foreach { case (connectO, in_index) =>
+      outputPortAddresses(connectO).zipWithIndex.foreach { case (p, out_index) =>
+        p.foreach(a => outputSegsAddresses(out_index).addOne((inputSegs(in_index), a)))
+    }}
+
+    // Register global route
+    node.foreach(n => XbarGlobalView.xbars.addOne(new XbarView(n, inputSegs, outputSegs, outputSegsAddresses.map(_.toSeq).toSeq)))
+
+    // Print address mapping
+    if (true) {
+      outputSegsAddresses.zip(outputSegs).zipWithIndex.foreach { case ((p, n), out_index) => {
+        if (!p.isEmpty) {
+          println(s"[Diplomacy-M] Output mapping to ${n.name} ${n.valName.name} ${n.hashCode()}: ")
+          p.foreach { case (in, a) => println(s"[Diplomacy-M]   ${in.name} ${in.valName.name} ${in.hashCode()} -> ${a}") }
+      }}}
+    }
+
+    println(s"[Diplomacy] ========================")
 
     // Print the ID mapping
     if (false) {

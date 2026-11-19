@@ -39,7 +39,7 @@ class TLJbar(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parame
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    node.inoutGrouped.foreach { case (in, out) => TLXbar.circuit(policy, in, out) }
+    node.inoutGrouped.foreach { case (in, out) => TLXbar.circuit(policy, in, out, Some(node)) }
   }
 }
 
